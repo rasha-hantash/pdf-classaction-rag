@@ -54,6 +54,16 @@ class TestFixedSizeChunking:
         result = fixed_size_chunking("some text", chunk_size=0)
         assert result == []
 
+    def test_negative_overlap_raises(self):
+        """Test that negative overlap raises ValueError."""
+        with pytest.raises(ValueError, match="overlap must be non-negative"):
+            fixed_size_chunking("some text", chunk_size=100, overlap=-1)
+
+    def test_overlap_exceeds_chunk_size_raises(self):
+        """Test that overlap >= chunk_size raises ValueError."""
+        with pytest.raises(ValueError, match="overlap must be less than chunk_size"):
+            fixed_size_chunking("some text", chunk_size=100, overlap=100)
+
 
 class TestSemanticChunking:
     """Tests for semantic_chunking_by_paragraphs function."""

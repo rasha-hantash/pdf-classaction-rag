@@ -33,6 +33,9 @@ def fixed_size_chunking(
     if not text or chunk_size <= 0:
         return []
 
+    if overlap < 0:
+        raise ValueError("overlap must be non-negative")
+
     if overlap >= chunk_size:
         raise ValueError("overlap must be less than chunk_size to avoid infinite loops")
 

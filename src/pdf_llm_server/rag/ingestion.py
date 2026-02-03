@@ -84,7 +84,7 @@ def ingest_document(
     # Step 3: Assess OCR needs
     needs_ocr = assess_needs_ocr(file_path)
     if needs_ocr:
-        logger.warn(
+        logger.warning(
             "document may need ocr",
             file_path=str(file_path),
             message="Text extraction may be incomplete for scanned documents",
