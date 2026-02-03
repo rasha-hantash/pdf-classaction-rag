@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from ..logger import logger
 from .chunking import ChunkData, chunk_parsed_document
 from .database import PgVectorStore
-from .models import ChunkRecord, IngestedDocument
+from .models import IngestedDocument
 from .ocr import assess_needs_ocr
 from .pdf_parser import parse_pdf
 
@@ -17,9 +17,10 @@ from .pdf_parser import parse_pdf
 class IngestResult(BaseModel):
     """Result of a document ingestion."""
 
-    document: IngestedDocument
-    chunks_count: int
+    document: IngestedDocument | None = None
+    chunks_count: int = 0
     was_duplicate: bool = False
+    error: str | None = None
 
 
 def compute_file_hash(file_path: str | Path) -> str:
@@ -43,6 +44,9 @@ def compute_file_hash(file_path: str | Path) -> str:
     return sha256.hexdigest()
 
 
+# TODO: Add path traversal validation before public deployment.
+# file_path should be validated to prevent directory traversal attacks
+# (e.g., ensure resolved path is within allowed directories).
 def ingest_document(
     file_path: str | Path,
     db: PgVectorStore,
@@ -92,29 +96,13 @@ def ingest_document(
     # Step 5: Chunk content
     chunk_data_list = chunk_parsed_document(parsed_doc, strategy=chunking_strategy)
 
-    # Step 6: Insert document record
-    document = db.insert_document(
+    # Step 6: Insert document and chunks atomically in a single transaction
+    document, chunk_records = db.insert_document_with_chunks(
         file_hash=file_hash,
         file_path=str(file_path),
+        chunks=chunk_data_list,
         metadata=metadata or {},
     )
-
-    # Step 7: Convert ChunkData to ChunkRecord and insert
-    chunk_records = [
-        ChunkRecord(
-            document_id=document.id,
-            content=cd.content,
-            chunk_type=cd.chunk_type,
-            page_number=cd.page_number,
-            position=cd.position,
-            bbox=cd.bbox,
-            embedding=None,  # Embeddings added by separate process
-        )
-        for cd in chunk_data_list
-    ]
-
-    if chunk_records:
-        db.insert_chunks(chunk_records)
 
     duration_ms = (time.perf_counter() - start) * 1000
     logger.info(
@@ -194,32 +182,34 @@ class RAGIngestionPipeline:
             try:
                 result = self.ingest(file_path, metadata)
                 results.append(result)
-
-                if i % 10 == 0 or i == total:
-                    logger.info(
-                        "batch progress",
-                        processed=i,
-                        total=total,
-                        percent=round(i / total * 100, 1),
-                    )
             except Exception as e:
                 logger.error(
                     "failed to ingest document",
                     file_path=str(file_path),
                     error=str(e),
                 )
-                # Continue with next file
+                # Track failed file in results
+                results.append(IngestResult(error=str(e)))
+
+            if i % 10 == 0 or i == total:
+                logger.info(
+                    "batch progress",
+                    processed=i,
+                    total=total,
+                    percent=round(i / total * 100, 1),
+                )
 
         duration_ms = (time.perf_counter() - start) * 1000
-        successful = sum(1 for r in results if not r.was_duplicate)
+        successful = sum(1 for r in results if r.document and not r.was_duplicate)
         duplicates = sum(1 for r in results if r.was_duplicate)
+        failed = sum(1 for r in results if r.error)
 
         logger.info(
             "batch ingestion complete",
             total_files=total,
             successful=successful,
             duplicates=duplicates,
-            failed=total - len(results),
+            failed=failed,
             duration_ms=round(duration_ms, 2),
         )
 
