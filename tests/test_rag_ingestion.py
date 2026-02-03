@@ -6,6 +6,8 @@ from pathlib import Path
 import fitz
 import pytest
 
+from psycopg2.extras import RealDictCursor
+
 from pdf_llm_server.rag import (
     PgVectorStore,
     RAGIngestionPipeline,
@@ -223,9 +225,10 @@ class TestRAGIngestionPipeline:
         # Mix of valid and invalid files
         results = pipeline.ingest_batch([sample_pdf_path, nonexistent])
 
-        # Should have result for the valid file
-        assert len(results) == 1
-        assert results[0].document is not None
+        # Should have results for both files (success and error)
+        assert len(results) == 2
+        assert results[0].document is not None  # valid file succeeded
+        assert results[1].error is not None  # missing file failed
 
 
 class TestEndToEndIntegration:
@@ -260,7 +263,7 @@ class TestEndToEndIntegration:
         result = pipeline.ingest(sample_pdf_path)
 
         # Query chunks directly to verify fields
-        with db.conn.cursor() as cur:
+        with db.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 "SELECT * FROM chunks WHERE document_id = %s",
                 (str(result.document.id),),
@@ -270,6 +273,6 @@ class TestEndToEndIntegration:
         assert len(rows) == result.chunks_count
         # Each row should have content, chunk_type, page_number, position
         for row in rows:
-            assert row[2]  # content (index 2)
-            assert row[4] is not None  # page_number (index 4)
-            assert row[5] is not None  # position (index 5)
+            assert row["content"]
+            assert row["page_number"] is not None
+            assert row["position"] is not None
