@@ -4,7 +4,7 @@ from uuid import UUID
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import Json, RealDictCursor, execute_values
 
 from .models import ChunkRecord, IngestedDocument, SearchResult
 
@@ -45,12 +45,16 @@ class PgVectorStore:
         migrations_dir = Path(migrations_dir)
 
         migration_files = sorted(migrations_dir.glob("*.up.sql"))
-        with self.conn.cursor() as cur:
-            for migration_file in migration_files:
-                sql = migration_file.read_text()
-                cur.execute(sql)
-        self.conn.commit()
-        self._ensure_vector_registered()
+        try:
+            with self.conn.cursor() as cur:
+                for migration_file in migration_files:
+                    sql = migration_file.read_text()
+                    cur.execute(sql)
+            self.conn.commit()
+            self._ensure_vector_registered()
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def insert_document(
         self,
@@ -59,33 +63,31 @@ class PgVectorStore:
         metadata: dict | None = None,
     ) -> IngestedDocument:
         metadata = metadata or {}
-        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                """
-                INSERT INTO documents (file_hash, file_path, metadata)
-                VALUES (%s, %s, %s)
-                RETURNING id, file_hash, file_path, metadata, created_at
-                """,
-                (file_hash, file_path, psycopg2.extras.Json(metadata)),
-            )
-            row = cur.fetchone()
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    INSERT INTO documents (file_hash, file_path, metadata)
+                    VALUES (%s, %s, %s)
+                    RETURNING id, file_hash, file_path, metadata, created_at
+                    """,
+                    (file_hash, file_path, Json(metadata)),
+                )
+                row = cur.fetchone()
             self.conn.commit()
             return IngestedDocument(**row)
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def insert_chunks(self, chunks: list[ChunkRecord]) -> list[ChunkRecord]:
         if not chunks:
             return []
 
         self._ensure_vector_registered()
-        inserted = []
-        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            for chunk in chunks:
-                cur.execute(
-                    """
-                    INSERT INTO chunks (document_id, content, chunk_type, page_number, position, embedding)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    RETURNING id, document_id, content, chunk_type, page_number, position, embedding, created_at
-                    """,
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                values = [
                     (
                         str(chunk.document_id),
                         chunk.content,
@@ -93,12 +95,24 @@ class PgVectorStore:
                         chunk.page_number,
                         chunk.position,
                         chunk.embedding,
-                    ),
+                    )
+                    for chunk in chunks
+                ]
+                inserted_rows = execute_values(
+                    cur,
+                    """
+                    INSERT INTO chunks (document_id, content, chunk_type, page_number, position, embedding)
+                    VALUES %s
+                    RETURNING id, document_id, content, chunk_type, page_number, position, embedding, created_at
+                    """,
+                    values,
+                    fetch=True,
                 )
-                row = cur.fetchone()
-                inserted.append(ChunkRecord(**row))
             self.conn.commit()
-        return inserted
+            return [ChunkRecord(**row) for row in inserted_rows]
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def similarity_search(
         self,
@@ -164,8 +178,12 @@ class PgVectorStore:
         return IngestedDocument(**row) if row else None
 
     def delete_document(self, document_id: UUID) -> bool:
-        with self.conn.cursor() as cur:
-            cur.execute("DELETE FROM documents WHERE id = %s", (str(document_id),))
-            deleted = cur.rowcount > 0
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("DELETE FROM documents WHERE id = %s", (str(document_id),))
+                deleted = cur.rowcount > 0
             self.conn.commit()
-        return deleted
+            return deleted
+        except Exception:
+            self.conn.rollback()
+            raise
