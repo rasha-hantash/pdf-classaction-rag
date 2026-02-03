@@ -62,3 +62,33 @@ with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
     cur.execute("SELECT * FROM table")
     row = cur.fetchone()  # Returns dict with column names as keys
 ```
+
+## Testing Patterns
+
+### 1. Use explicit table truncation for test isolation
+
+Always truncate tables between tests to ensure test isolation. Use an `autouse` fixture that runs before each test:
+
+```python
+@pytest.fixture(autouse=True)
+def truncate_tables(db):
+    """Truncate tables before each test for isolation."""
+    db.truncate_tables()
+    yield
+```
+
+This prevents test interdependencies and ensures each test starts with a clean database state.
+
+### 2. Pass migrations directory explicitly in tests
+
+```python
+MIGRATIONS_DIR = Path(__file__).parent.parent / "migrations"
+
+@pytest.fixture(scope="module")
+def db():
+    store = PgVectorStore(connection_string)
+    store.connect()
+    store.run_migrations(MIGRATIONS_DIR)  # Always pass explicitly
+    yield store
+    store.disconnect()
+```

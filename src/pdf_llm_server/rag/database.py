@@ -39,9 +39,13 @@ class PgVectorStore:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.disconnect()
 
-    def run_migrations(self, migrations_dir: str | Path | None = None):
-        if migrations_dir is None:
-            migrations_dir = Path(__file__).parent.parent.parent.parent / "migrations"
+    def run_migrations(self, migrations_dir: str | Path):
+        """Run database migrations from the specified directory.
+
+        Args:
+            migrations_dir: Path to the directory containing migration files.
+                           This is required to avoid fragile path traversal.
+        """
         migrations_dir = Path(migrations_dir)
 
         migration_files = sorted(migrations_dir.glob("*.up.sql"))
@@ -184,6 +188,16 @@ class PgVectorStore:
                 deleted = cur.rowcount > 0
             self.conn.commit()
             return deleted
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    def truncate_tables(self) -> None:
+        """Truncate all tables. Use only in tests for isolation between test runs."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("TRUNCATE TABLE chunks, documents CASCADE")
+            self.conn.commit()
         except Exception:
             self.conn.rollback()
             raise

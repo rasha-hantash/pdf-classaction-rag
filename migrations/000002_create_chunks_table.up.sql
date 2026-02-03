@@ -12,4 +12,5 @@ CREATE TABLE IF NOT EXISTS chunks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunks_document_id ON chunks(document_id);
-CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+-- NOTE: IVFFlat index should be created after data ingestion, not on empty tables.
+-- See: TODO - Add migration for vector index after initial data load (requires lists * 1000 rows minimum).

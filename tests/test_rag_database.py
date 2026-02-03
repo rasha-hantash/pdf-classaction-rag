@@ -1,8 +1,13 @@
 import os
-import pytest
-from uuid import uuid4
+from pathlib import Path
 
-from pdf_llm_server.rag import PgVectorStore, IngestedDocument, ChunkRecord
+import pytest
+
+from pdf_llm_server.rag import PgVectorStore, ChunkRecord
+
+
+# Path to migrations directory (relative to this test file)
+MIGRATIONS_DIR = Path(__file__).parent.parent / "migrations"
 
 
 @pytest.fixture(scope="module")
@@ -14,28 +19,25 @@ def db():
     )
     store = PgVectorStore(connection_string)
     store.connect()
-    store.run_migrations()
+    store.run_migrations(MIGRATIONS_DIR)
     yield store
     store.disconnect()
 
 
-@pytest.fixture
-def cleanup_documents(db):
-    """Clean up documents after each test."""
-    created_ids = []
-    yield created_ids
-    for doc_id in created_ids:
-        db.delete_document(doc_id)
+@pytest.fixture(autouse=True)
+def truncate_tables(db):
+    """Truncate tables before each test for isolation."""
+    db.truncate_tables()
+    yield
 
 
 class TestDocumentOperations:
-    def test_insert_document(self, db, cleanup_documents):
+    def test_insert_document(self, db):
         doc = db.insert_document(
             file_hash="abc123hash",
             file_path="/path/to/test.pdf",
             metadata={"title": "Test Document"},
         )
-        cleanup_documents.append(doc.id)
 
         assert doc.id is not None
         assert doc.file_hash == "abc123hash"
@@ -43,25 +45,23 @@ class TestDocumentOperations:
         assert doc.metadata == {"title": "Test Document"}
         assert doc.created_at is not None
 
-    def test_get_documents(self, db, cleanup_documents):
+    def test_get_documents(self, db):
         doc = db.insert_document(
             file_hash="hash_for_get_test",
             file_path="/path/to/get_test.pdf",
             metadata={},
         )
-        cleanup_documents.append(doc.id)
 
         documents = db.get_documents()
-        assert len(documents) >= 1
-        assert any(d.id == doc.id for d in documents)
+        assert len(documents) == 1
+        assert documents[0].id == doc.id
 
-    def test_get_document_by_hash(self, db, cleanup_documents):
+    def test_get_document_by_hash(self, db):
         doc = db.insert_document(
             file_hash="unique_hash_123",
             file_path="/path/to/unique.pdf",
             metadata={},
         )
-        cleanup_documents.append(doc.id)
 
         found = db.get_document_by_hash("unique_hash_123")
         assert found is not None
@@ -83,13 +83,12 @@ class TestDocumentOperations:
         found = db.get_document_by_hash("hash_to_delete")
         assert found is None
 
-    def test_duplicate_hash_fails(self, db, cleanup_documents):
-        doc = db.insert_document(
+    def test_duplicate_hash_fails(self, db):
+        db.insert_document(
             file_hash="duplicate_test_hash",
             file_path="/path/to/first.pdf",
             metadata={},
         )
-        cleanup_documents.append(doc.id)
 
         with pytest.raises(Exception):
             db.insert_document(
@@ -97,18 +96,15 @@ class TestDocumentOperations:
                 file_path="/path/to/second.pdf",
                 metadata={},
             )
-        # Rollback the failed transaction to allow subsequent tests to run
-        db.conn.rollback()
 
 
 class TestChunkOperations:
-    def test_insert_chunks(self, db, cleanup_documents):
+    def test_insert_chunks(self, db):
         doc = db.insert_document(
             file_hash="hash_for_chunks",
             file_path="/path/to/chunked.pdf",
             metadata={},
         )
-        cleanup_documents.append(doc.id)
 
         chunks = [
             ChunkRecord(
@@ -132,13 +128,12 @@ class TestChunkOperations:
         assert all(c.id is not None for c in inserted)
         assert inserted[0].content == "This is the first chunk of text."
 
-    def test_insert_chunks_with_embedding(self, db, cleanup_documents):
+    def test_insert_chunks_with_embedding(self, db):
         doc = db.insert_document(
             file_hash="hash_for_embedded_chunks",
             file_path="/path/to/embedded.pdf",
             metadata={},
         )
-        cleanup_documents.append(doc.id)
 
         mock_embedding = [0.1] * 1536
 
@@ -159,13 +154,12 @@ class TestChunkOperations:
 
 
 class TestSimilaritySearch:
-    def test_similarity_search(self, db, cleanup_documents):
+    def test_similarity_search(self, db):
         doc = db.insert_document(
             file_hash="hash_for_search",
             file_path="/path/to/searchable.pdf",
             metadata={"source": "test"},
         )
-        cleanup_documents.append(doc.id)
 
         embedding1 = [0.1] * 1536
         embedding2 = [0.9] * 1536
@@ -193,12 +187,13 @@ class TestSimilaritySearch:
         query_embedding = [0.1] * 1536
         results = db.similarity_search(query_embedding, top_k=2)
 
-        assert len(results) >= 1
+        assert len(results) == 2
         assert results[0].score is not None
         assert results[0].chunk is not None
         assert results[0].document is not None
 
     def test_similarity_search_empty(self, db):
+        # Tables are truncated before each test, so this should return empty results
         random_embedding = [0.5] * 1536
         results = db.similarity_search(random_embedding, top_k=5)
-        assert isinstance(results, list)
+        assert results == []
