@@ -17,7 +17,7 @@ class TextBlock(BaseModel):
     text: str
     font_size: float
     is_bold: bool
-    bbox: list[float]  # [x0, y0, x1, y1]
+    bbox: list[float] | None = None  # [x0, y0, x1, y1], None if unavailable
 
 
 class TableData(BaseModel):
@@ -126,86 +126,95 @@ def parse_pdf(file_path: str | Path) -> ParsedDocument:
         raise FileNotFoundError(f"PDF file not found: {file_path}")
 
     doc = fitz.open(file_path)
-    logger.info("parsing pdf", file_path=str(file_path), total_pages=doc.page_count)
+    try:
+        logger.info("parsing pdf", file_path=str(file_path), total_pages=doc.page_count)
 
-    # First pass: collect all font sizes to calculate median
-    all_font_sizes = []
-    for page in doc:
-        page_dict = page.get_text("dict")
-        for block in page_dict.get("blocks", []):
-            if block.get("type") == 0:  # Text block
-                _, font_size, _ = _extract_spans_info(block)
-                if font_size > 0:
-                    all_font_sizes.append(font_size)
+        # First pass: collect all font sizes to calculate median
+        all_font_sizes = []
+        for page in doc:
+            page_dict = page.get_text("dict")
+            for block in page_dict.get("blocks", []):
+                if block.get("type") == 0:  # Text block
+                    _, font_size, _ = _extract_spans_info(block)
+                    if font_size > 0:
+                        all_font_sizes.append(font_size)
 
-    median_size = statistics.median(all_font_sizes) if all_font_sizes else 12.0
+        median_size = statistics.median(all_font_sizes) if all_font_sizes else 12.0
 
-    # Second pass: extract and classify blocks
-    parsed_pages = []
-    for page_num, page in enumerate(doc):
-        page_dict = page.get_text("dict")
-        blocks = []
+        # Second pass: extract and classify blocks
+        parsed_pages = []
+        for page_num, page in enumerate(doc):
+            page_dict = page.get_text("dict")
+            blocks = []
 
-        for block_idx, block in enumerate(page_dict.get("blocks", [])):
-            if block.get("type") != 0:  # Skip non-text blocks (images, etc.)
-                continue
+            for block_idx, block in enumerate(page_dict.get("blocks", [])):
+                if block.get("type") != 0:  # Skip non-text blocks (images, etc.)
+                    continue
 
-            text, font_size, is_bold = _extract_spans_info(block)
-            if not text.strip():
-                continue
+                text, font_size, is_bold = _extract_spans_info(block)
+                if not text.strip():
+                    continue
 
-            bbox = block.get("bbox", [0, 0, 0, 0])
-            block_type = _classify_block(text, font_size, median_size, is_bold)
-
-            blocks.append(
-                TextBlock(
-                    block_index=block_idx,
-                    block_type=block_type,
-                    text=text,
-                    font_size=font_size,
-                    is_bold=is_bold,
-                    bbox=list(bbox),
-                )
-            )
-
-        # Extract tables using PyMuPDF's table finder
-        tables = []
-        try:
-            page_tables = page.find_tables()
-            for table_idx, table in enumerate(page_tables):
-                extracted = table.extract()
-                if extracted and len(extracted) > 0:
-                    headers = [str(cell) if cell else "" for cell in extracted[0]]
-                    rows = [
-                        [str(cell) if cell else "" for cell in row]
-                        for row in extracted[1:]
-                    ]
-                    tables.append(
-                        TableData(table_index=table_idx, headers=headers, rows=rows)
+                bbox = block.get("bbox")
+                if bbox is None:
+                    logger.warn(
+                        "missing bbox for text block",
+                        file_path=str(file_path),
+                        page_number=page_num + 1,
+                        block_index=block_idx,
                     )
-        except Exception as e:
-            logger.warn(
-                "table extraction failed",
-                page_number=page_num + 1,
-                error=str(e),
+
+                block_type = _classify_block(text, font_size, median_size, is_bold)
+
+                blocks.append(
+                    TextBlock(
+                        block_index=block_idx,
+                        block_type=block_type,
+                        text=text,
+                        font_size=font_size,
+                        is_bold=is_bold,
+                        bbox=list(bbox) if bbox else None,
+                    )
+                )
+
+            # Extract tables using PyMuPDF's table finder
+            tables = []
+            try:
+                page_tables = page.find_tables()
+                for table_idx, table in enumerate(page_tables):
+                    extracted = table.extract()
+                    if extracted and len(extracted) > 0:
+                        headers = [str(cell) if cell else "" for cell in extracted[0]]
+                        rows = [
+                            [str(cell) if cell else "" for cell in row]
+                            for row in extracted[1:]
+                        ]
+                        tables.append(
+                            TableData(table_index=table_idx, headers=headers, rows=rows)
+                        )
+            except Exception as e:
+                logger.warn(
+                    "table extraction failed",
+                    page_number=page_num + 1,
+                    error=str(e),
+                )
+
+            parsed_pages.append(
+                ParsedPage(page_number=page_num + 1, blocks=blocks, tables=tables)
             )
 
-        parsed_pages.append(
-            ParsedPage(page_number=page_num + 1, blocks=blocks, tables=tables)
+        logger.info(
+            "pdf parsed successfully",
+            file_path=str(file_path),
+            total_pages=len(parsed_pages),
+            total_blocks=sum(len(p.blocks) for p in parsed_pages),
+            total_tables=sum(len(p.tables) for p in parsed_pages),
         )
 
-    doc.close()
-
-    logger.info(
-        "pdf parsed successfully",
-        file_path=str(file_path),
-        total_pages=len(parsed_pages),
-        total_blocks=sum(len(p.blocks) for p in parsed_pages),
-        total_tables=sum(len(p.tables) for p in parsed_pages),
-    )
-
-    return ParsedDocument(
-        file_path=str(file_path),
-        total_pages=len(parsed_pages),
-        pages=parsed_pages,
-    )
+        return ParsedDocument(
+            file_path=str(file_path),
+            total_pages=len(parsed_pages),
+            pages=parsed_pages,
+        )
+    finally:
+        doc.close()
