@@ -63,6 +63,31 @@ with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
     row = cur.fetchone()  # Returns dict with column names as keys
 ```
 
+## Resource Cleanup
+
+### Always use try-finally for file handles and external resources
+
+When opening files, documents, or other resources that need cleanup, always use try-finally to ensure the resource is closed even if an exception occurs:
+
+```python
+# GOOD - resource is always closed
+doc = fitz.open(file_path)
+try:
+    # all processing logic here
+    result = process_document(doc)
+    return result
+finally:
+    doc.close()
+
+# BAD - resource leaks if exception occurs before close()
+doc = fitz.open(file_path)
+result = process_document(doc)  # if this throws, doc is never closed
+doc.close()
+return result
+```
+
+This prevents file handle leaks which can cause "too many open files" errors in long-running processes.
+
 ## Testing Patterns
 
 ### 1. Use explicit table truncation for test isolation
