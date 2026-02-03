@@ -20,6 +20,7 @@ class ChunkRecord(BaseModel):
     page_number: int | None = None
     position: int | None = None
     embedding: list[float] | None = None
+    bbox: list[float] | None = None  # [x0, y0, x1, y1] coordinates
     created_at: datetime | None = None
 
 
