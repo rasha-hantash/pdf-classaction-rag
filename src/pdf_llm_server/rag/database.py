@@ -125,15 +125,16 @@ class PgVectorStore:
                         chunk.page_number,
                         chunk.position,
                         chunk.embedding,
+                        Json(chunk.bbox) if chunk.bbox else None,
                     )
                     for chunk in chunks
                 ]
                 inserted_rows = execute_values(
                     cur,
                     """
-                    INSERT INTO chunks (document_id, content, chunk_type, page_number, position, embedding)
+                    INSERT INTO chunks (document_id, content, chunk_type, page_number, position, embedding, bbox)
                     VALUES %s
-                    RETURNING id, document_id, content, chunk_type, page_number, position, embedding, created_at
+                    RETURNING id, document_id, content, chunk_type, page_number, position, embedding, bbox, created_at
                     """,
                     values,
                     fetch=True,
@@ -170,7 +171,7 @@ class PgVectorStore:
                 """
                 SELECT
                     c.id, c.document_id, c.content, c.chunk_type, c.page_number,
-                    c.position, c.embedding, c.created_at,
+                    c.position, c.embedding, c.bbox, c.created_at,
                     d.id as doc_id, d.file_hash, d.file_path, d.metadata, d.created_at as doc_created_at,
                     1 - (c.embedding <=> %s::vector) as score
                 FROM chunks c
@@ -193,6 +194,7 @@ class PgVectorStore:
                 page_number=row["page_number"],
                 position=row["position"],
                 embedding=row["embedding"],
+                bbox=row.get("bbox"),
                 created_at=row["created_at"],
             )
             document = IngestedDocument(
