@@ -63,6 +63,88 @@ with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
     row = cur.fetchone()  # Returns dict with column names as keys
 ```
 
+## Resource Cleanup
+
+### Always use try-finally for file handles and external resources
+
+When opening files, documents, or other resources that need cleanup, always use try-finally to ensure the resource is closed even if an exception occurs:
+
+```python
+# GOOD - resource is always closed
+doc = fitz.open(file_path)
+try:
+    # all processing logic here
+    result = process_document(doc)
+    return result
+finally:
+    doc.close()
+
+# BAD - resource leaks if exception occurs before close()
+doc = fitz.open(file_path)
+result = process_document(doc)  # if this throws, doc is never closed
+doc.close()
+return result
+```
+
+This prevents file handle leaks which can cause "too many open files" errors in long-running processes.
+
+## Multi-Table Operations
+
+### Use database transactions for atomic multi-table inserts
+
+When inserting records across multiple tables (e.g., document + chunks), use a single database transaction so both operations succeed or fail together:
+
+```python
+def insert_document_with_chunks(self, file_hash, file_path, chunks, metadata=None):
+    """Insert document and chunks atomically in a single transaction."""
+    try:
+        with self.conn.cursor() as cur:
+            # Insert document
+            cur.execute("INSERT INTO documents (...) VALUES (...) RETURNING *", ...)
+            doc = cur.fetchone()
+
+            # Insert chunks with the document_id
+            if chunks:
+                execute_values(cur, "INSERT INTO chunks (...) VALUES %s", ...)
+
+        # Commit both operations together
+        self.conn.commit()
+        return doc, chunks
+    except Exception:
+        self.conn.rollback()
+        raise
+```
+
+This ensures atomic operations - if chunk insertion fails, the document insertion is also rolled back automatically.
+
+## Batch Operation Patterns
+
+### Track failures in batch results
+
+When processing batches, include failed items in results with error information rather than silently skipping them:
+
+```python
+class BatchResult(BaseModel):
+    item: Item | None = None
+    error: str | None = None
+
+def process_batch(items: list[Item]) -> list[BatchResult]:
+    results = []
+    for item in items:
+        try:
+            processed = process_item(item)
+            results.append(BatchResult(item=processed))
+        except Exception as e:
+            logger.error("failed to process item", item_id=item.id, error=str(e))
+            results.append(BatchResult(error=str(e)))
+    return results
+```
+
+This allows callers to:
+1. Know exactly which items failed and why
+2. Retry only failed items
+3. Generate accurate success/failure reports
+
 ## Testing Patterns
 
 ### 1. Use explicit table truncation for test isolation

@@ -8,6 +8,7 @@ from pgvector.psycopg2 import register_vector
 from psycopg2.extras import Json, RealDictCursor, execute_values
 
 from ..logger import logger
+from .chunking import ChunkData
 from .models import ChunkRecord, IngestedDocument, SearchResult
 
 
@@ -231,6 +232,91 @@ class PgVectorStore:
             )
             row = cur.fetchone()
         return IngestedDocument(**row) if row else None
+
+    def insert_document_with_chunks(
+        self,
+        file_hash: str,
+        file_path: str,
+        chunks: list[ChunkData],
+        metadata: dict | None = None,
+    ) -> tuple[IngestedDocument, list[ChunkRecord]]:
+        """Insert a document and its chunks atomically in a single transaction.
+
+        Args:
+            file_hash: SHA-256 hash of the file.
+            file_path: Path to the file.
+            chunks: List of ChunkData objects from the chunking module.
+            metadata: Optional metadata to attach to the document.
+
+        Returns:
+            Tuple of (IngestedDocument, list of inserted ChunkRecords).
+        """
+        metadata = metadata or {}
+        self._ensure_vector_registered()
+        start = time.perf_counter()
+
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Insert document
+                cur.execute(
+                    """
+                    INSERT INTO documents (file_hash, file_path, metadata)
+                    VALUES (%s, %s, %s)
+                    RETURNING id, file_hash, file_path, metadata, created_at
+                    """,
+                    (file_hash, file_path, Json(metadata)),
+                )
+                doc_row = cur.fetchone()
+                doc = IngestedDocument(**doc_row)
+
+                # Insert chunks with the new document_id
+                inserted_chunks = []
+                if chunks:
+                    values = [
+                        (
+                            str(doc.id),
+                            chunk.content,
+                            chunk.chunk_type,
+                            chunk.page_number,
+                            chunk.position,
+                            None,  # embedding - added by separate process
+                            Json(chunk.bbox) if chunk.bbox else None,
+                        )
+                        for chunk in chunks
+                    ]
+                    inserted_rows = execute_values(
+                        cur,
+                        """
+                        INSERT INTO chunks (document_id, content, chunk_type, page_number, position, embedding, bbox)
+                        VALUES %s
+                        RETURNING id, document_id, content, chunk_type, page_number, position, embedding, bbox, created_at
+                        """,
+                        values,
+                        fetch=True,
+                    )
+                    inserted_chunks = [ChunkRecord(**row) for row in inserted_rows]
+
+            # Commit both operations together
+            self.conn.commit()
+
+            duration_ms = (time.perf_counter() - start) * 1000
+            logger.info(
+                "document and chunks inserted",
+                document_id=str(doc.id),
+                file_hash=file_hash,
+                chunks_count=len(inserted_chunks),
+                duration_ms=round(duration_ms, 2),
+            )
+            return doc, inserted_chunks
+
+        except Exception as e:
+            self.conn.rollback()
+            logger.error(
+                "document and chunks insert failed",
+                file_hash=file_hash,
+                error=str(e),
+            )
+            raise
 
     def delete_document(self, document_id: UUID) -> bool:
         start = time.perf_counter()

@@ -27,35 +27,36 @@ def assess_needs_ocr(file_path: str | Path) -> bool:
         raise FileNotFoundError(f"PDF file not found: {file_path}")
 
     doc = fitz.open(file_path)
-    total_chars = 0
-    pages_checked = 0
+    try:
+        total_chars = 0
+        pages_checked = 0
 
-    # Sample pages (first 10 or all if fewer)
-    sample_size = min(10, doc.page_count)
+        # Sample pages (first 10 or all if fewer)
+        sample_size = min(10, doc.page_count)
 
-    for i in range(sample_size):
-        page = doc[i]
-        text = page.get_text()
-        total_chars += len(text.strip())
-        pages_checked += 1
+        for i in range(sample_size):
+            page = doc[i]
+            text = page.get_text()
+            total_chars += len(text.strip())
+            pages_checked += 1
 
-    doc.close()
+        if pages_checked == 0:
+            return True
 
-    if pages_checked == 0:
-        return True
+        avg_chars_per_page = total_chars / pages_checked
+        needs_ocr = avg_chars_per_page < SCANNED_CHARS_THRESHOLD
 
-    avg_chars_per_page = total_chars / pages_checked
-    needs_ocr = avg_chars_per_page < SCANNED_CHARS_THRESHOLD
+        logger.info(
+            "ocr assessment complete",
+            file_path=str(file_path),
+            avg_chars_per_page=round(avg_chars_per_page, 1),
+            pages_sampled=pages_checked,
+            needs_ocr=needs_ocr,
+        )
 
-    logger.info(
-        "ocr assessment complete",
-        file_path=str(file_path),
-        avg_chars_per_page=round(avg_chars_per_page, 1),
-        pages_sampled=pages_checked,
-        needs_ocr=needs_ocr,
-    )
-
-    return needs_ocr
+        return needs_ocr
+    finally:
+        doc.close()
 
 
 def ocr_pdf_with_tesseract(file_path: str | Path, dpi: int = 300) -> str:
@@ -73,7 +74,11 @@ def ocr_pdf_with_tesseract(file_path: str | Path, dpi: int = 300) -> str:
 
     Raises:
         ImportError: If pytesseract or Pillow is not installed.
+        ValueError: If dpi is not a positive integer.
     """
+    if dpi <= 0:
+        raise ValueError("dpi must be a positive integer")
+
     try:
         import pytesseract
         from PIL import Image
@@ -88,41 +93,42 @@ def ocr_pdf_with_tesseract(file_path: str | Path, dpi: int = 300) -> str:
         raise FileNotFoundError(f"PDF file not found: {file_path}")
 
     doc = fitz.open(file_path)
-    all_text = []
+    try:
+        all_text = []
 
-    logger.info(
-        "starting ocr processing",
-        file_path=str(file_path),
-        total_pages=doc.page_count,
-        dpi=dpi,
-    )
+        logger.info(
+            "starting ocr processing",
+            file_path=str(file_path),
+            total_pages=doc.page_count,
+            dpi=dpi,
+        )
 
-    for page_num, page in enumerate(doc):
-        # Render page to image
-        mat = fitz.Matrix(dpi / 72, dpi / 72)
-        pix = page.get_pixmap(matrix=mat)
+        for page_num, page in enumerate(doc):
+            # Render page to image
+            mat = fitz.Matrix(dpi / 72, dpi / 72)
+            pix = page.get_pixmap(matrix=mat)
 
-        # Convert to PIL Image
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            # Convert to PIL Image
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
-        # Run OCR
-        text = pytesseract.image_to_string(img)
-        all_text.append(text)
+            # Run OCR
+            text = pytesseract.image_to_string(img)
+            all_text.append(text)
 
-        if (page_num + 1) % 10 == 0:
-            logger.info(
-                "ocr progress",
-                pages_processed=page_num + 1,
-                total_pages=doc.page_count,
-            )
+            if (page_num + 1) % 10 == 0:
+                logger.info(
+                    "ocr progress",
+                    pages_processed=page_num + 1,
+                    total_pages=doc.page_count,
+                )
 
-    doc.close()
+        combined_text = "\n\n".join(all_text)
+        logger.info(
+            "ocr processing complete",
+            file_path=str(file_path),
+            total_chars=len(combined_text),
+        )
 
-    combined_text = "\n\n".join(all_text)
-    logger.info(
-        "ocr processing complete",
-        file_path=str(file_path),
-        total_chars=len(combined_text),
-    )
-
-    return combined_text
+        return combined_text
+    finally:
+        doc.close()
