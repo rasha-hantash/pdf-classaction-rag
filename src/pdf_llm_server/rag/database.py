@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 from uuid import UUID
 
@@ -6,6 +7,7 @@ import psycopg2
 from pgvector.psycopg2 import register_vector
 from psycopg2.extras import Json, RealDictCursor, execute_values
 
+from ..logger import logger
 from .models import ChunkRecord, IngestedDocument, SearchResult
 
 
@@ -19,7 +21,10 @@ class PgVectorStore:
         self._vector_registered = False
 
     def connect(self):
+        start = time.perf_counter()
         self.conn = psycopg2.connect(self.connection_string)
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.info("connected to database", duration_ms=round(duration_ms, 2))
 
     def _ensure_vector_registered(self):
         if not self._vector_registered:
@@ -31,6 +36,7 @@ class PgVectorStore:
             self.conn.close()
             self.conn = None
             self._vector_registered = False
+            logger.info("disconnected from database")
 
     def __enter__(self):
         self.connect()
@@ -49,6 +55,7 @@ class PgVectorStore:
         migrations_dir = Path(migrations_dir)
 
         migration_files = sorted(migrations_dir.glob("*.up.sql"))
+        start = time.perf_counter()
         try:
             with self.conn.cursor() as cur:
                 for migration_file in migration_files:
@@ -56,8 +63,15 @@ class PgVectorStore:
                     cur.execute(sql)
             self.conn.commit()
             self._ensure_vector_registered()
-        except Exception:
+            duration_ms = (time.perf_counter() - start) * 1000
+            logger.info(
+                "migrations completed",
+                migrations_count=len(migration_files),
+                duration_ms=round(duration_ms, 2),
+            )
+        except Exception as e:
             self.conn.rollback()
+            logger.error("migrations failed", error=str(e))
             raise
 
     def insert_document(
@@ -67,6 +81,7 @@ class PgVectorStore:
         metadata: dict | None = None,
     ) -> IngestedDocument:
         metadata = metadata or {}
+        start = time.perf_counter()
         try:
             with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
@@ -79,9 +94,18 @@ class PgVectorStore:
                 )
                 row = cur.fetchone()
             self.conn.commit()
-            return IngestedDocument(**row)
-        except Exception:
+            doc = IngestedDocument(**row)
+            duration_ms = (time.perf_counter() - start) * 1000
+            logger.info(
+                "document inserted",
+                document_id=str(doc.id),
+                file_hash=file_hash,
+                duration_ms=round(duration_ms, 2),
+            )
+            return doc
+        except Exception as e:
             self.conn.rollback()
+            logger.error("document insert failed", file_hash=file_hash, error=str(e))
             raise
 
     def insert_chunks(self, chunks: list[ChunkRecord]) -> list[ChunkRecord]:
@@ -89,6 +113,8 @@ class PgVectorStore:
             return []
 
         self._ensure_vector_registered()
+        start = time.perf_counter()
+        document_id = str(chunks[0].document_id)
         try:
             with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
                 values = [
@@ -113,9 +139,23 @@ class PgVectorStore:
                     fetch=True,
                 )
             self.conn.commit()
-            return [ChunkRecord(**row) for row in inserted_rows]
-        except Exception:
+            result = [ChunkRecord(**row) for row in inserted_rows]
+            duration_ms = (time.perf_counter() - start) * 1000
+            logger.info(
+                "chunks inserted",
+                document_id=document_id,
+                chunks_count=len(result),
+                duration_ms=round(duration_ms, 2),
+            )
+            return result
+        except Exception as e:
             self.conn.rollback()
+            logger.error(
+                "chunks insert failed",
+                document_id=document_id,
+                chunks_count=len(chunks),
+                error=str(e),
+            )
             raise
 
     def similarity_search(
@@ -124,6 +164,7 @@ class PgVectorStore:
         top_k: int = 5,
     ) -> list[SearchResult]:
         self._ensure_vector_registered()
+        start = time.perf_counter()
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
@@ -162,6 +203,14 @@ class PgVectorStore:
                 created_at=row["doc_created_at"],
             )
             results.append(SearchResult(chunk=chunk, score=row["score"], document=document))
+
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "similarity search completed",
+            top_k=top_k,
+            results_count=len(results),
+            duration_ms=round(duration_ms, 2),
+        )
         return results
 
     def get_documents(self) -> list[IngestedDocument]:
@@ -182,14 +231,23 @@ class PgVectorStore:
         return IngestedDocument(**row) if row else None
 
     def delete_document(self, document_id: UUID) -> bool:
+        start = time.perf_counter()
         try:
             with self.conn.cursor() as cur:
                 cur.execute("DELETE FROM documents WHERE id = %s", (str(document_id),))
                 deleted = cur.rowcount > 0
             self.conn.commit()
+            duration_ms = (time.perf_counter() - start) * 1000
+            logger.info(
+                "document deleted",
+                document_id=str(document_id),
+                deleted=deleted,
+                duration_ms=round(duration_ms, 2),
+            )
             return deleted
-        except Exception:
+        except Exception as e:
             self.conn.rollback()
+            logger.error("document delete failed", document_id=str(document_id), error=str(e))
             raise
 
     def truncate_tables(self) -> None:

@@ -92,3 +92,52 @@ def db():
     yield store
     store.disconnect()
 ```
+
+## Structured Logging
+
+Use the structured JSON logger for all log output. This matches the Go slog format for consistency across services.
+
+### Output Format
+
+```json
+{"time":"2026-02-03T14:06:20.829529-05:00","level":"INFO","source":{"function":"connect","file":"database.py","line":25},"msg":"connected to database","duration_ms":12.34}
+```
+
+### Basic Usage
+
+```python
+from pdf_llm_server.logger import logger
+
+# Simple message
+logger.info("connected to database")
+
+# With additional fields
+logger.info("document inserted", document_id="abc-123", duration_ms=45.2)
+
+# Error logging
+logger.error("operation failed", error=str(e), document_id="abc-123")
+```
+
+### Context Fields
+
+Use context fields for request-scoped data that should appear in all logs:
+
+```python
+from pdf_llm_server.logger import set_context, clear_context
+
+# Set context at request start
+set_context(request_id="req-123", user_id="user-456")
+
+# All subsequent logs include these fields
+logger.info("processing started")  # includes request_id and user_id
+
+# Clear at request end
+clear_context()
+```
+
+### Logging Guidelines
+
+1. **Always include `duration_ms`** for operations that have measurable latency (DB queries, API calls)
+2. **Include identifiers** like `document_id`, `chunk_id` for traceability
+3. **Log at appropriate levels**: `info` for normal operations, `error` for failures, `debug` for verbose output
+4. **Use structured fields** instead of string interpolation for queryable logs
