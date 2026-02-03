@@ -73,7 +73,11 @@ def ocr_pdf_with_tesseract(file_path: str | Path, dpi: int = 300) -> str:
 
     Raises:
         ImportError: If pytesseract or Pillow is not installed.
+        ValueError: If dpi is not a positive integer.
     """
+    if dpi <= 0:
+        raise ValueError("dpi must be a positive integer")
+
     try:
         import pytesseract
         from PIL import Image

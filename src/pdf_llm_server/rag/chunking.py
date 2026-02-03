@@ -33,6 +33,9 @@ def fixed_size_chunking(
     if not text or chunk_size <= 0:
         return []
 
+    if overlap >= chunk_size:
+        raise ValueError("overlap must be less than chunk_size to avoid infinite loops")
+
     if len(text) <= chunk_size:
         return [text]
 
@@ -49,11 +52,12 @@ def fixed_size_chunking(
                 end = last_space
 
         chunks.append(text[start:end].strip())
-        start = end - overlap
 
-        # Avoid infinite loop on very small overlaps
-        if start >= len(text) - overlap:
+        # Break after processing the final chunk
+        if end >= len(text):
             break
+
+        start = end - overlap
 
     return [c for c in chunks if c]
 
