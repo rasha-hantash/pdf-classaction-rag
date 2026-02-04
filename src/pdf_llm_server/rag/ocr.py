@@ -3,6 +3,8 @@
 from pathlib import Path
 
 import fitz  # PyMuPDF
+import pytesseract
+from PIL import Image
 
 from ..logger import logger
 
@@ -59,11 +61,34 @@ def assess_needs_ocr(file_path: str | Path) -> bool:
         doc.close()
 
 
+def ocr_page(page: fitz.Page, dpi: int = 200) -> str:
+    """OCR a single PDF page using Tesseract.
+
+    Args:
+        page: PyMuPDF page object.
+        dpi: Resolution for rendering (default 200 for balance of speed/quality).
+
+    Returns:
+        Extracted text from OCR, or empty string on timeout.
+    """
+    mat = fitz.Matrix(dpi / 72, dpi / 72)
+    pix = page.get_pixmap(matrix=mat)
+    img = None
+    try:
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        try:
+            return pytesseract.image_to_string(img, timeout=30)
+        except RuntimeError:
+            logger.warn("ocr timeout on page")
+            return ""
+    finally:
+        del pix
+        if img is not None:
+            del img
+
+
 def ocr_pdf_with_tesseract(file_path: str | Path, dpi: int = 300) -> str:
     """Perform OCR on a PDF using Tesseract.
-
-    This function requires pytesseract and Pillow to be installed.
-    Install with: pip install pytesseract Pillow
 
     Args:
         file_path: Path to the PDF file.
@@ -73,20 +98,10 @@ def ocr_pdf_with_tesseract(file_path: str | Path, dpi: int = 300) -> str:
         Extracted text from all pages.
 
     Raises:
-        ImportError: If pytesseract or Pillow is not installed.
         ValueError: If dpi is not a positive integer.
     """
     if dpi <= 0:
         raise ValueError("dpi must be a positive integer")
-
-    try:
-        import pytesseract
-        from PIL import Image
-    except ImportError as e:
-        raise ImportError(
-            "OCR requires pytesseract and Pillow. "
-            "Install with: pip install pytesseract Pillow"
-        ) from e
 
     file_path = Path(file_path)
     if not file_path.exists():
@@ -104,30 +119,8 @@ def ocr_pdf_with_tesseract(file_path: str | Path, dpi: int = 300) -> str:
         )
 
         for page_num, page in enumerate(doc):
-            # Render page to image
-            mat = fitz.Matrix(dpi / 72, dpi / 72)
-            pix = page.get_pixmap(matrix=mat)
-            img = None
-            try:
-                # Convert to PIL Image
-                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-
-                # Run OCR with timeout protection
-                try:
-                    text = pytesseract.image_to_string(img, timeout=30)
-                except RuntimeError:
-                    logger.warn(
-                        "ocr timeout on page",
-                        page_num=page_num + 1,
-                        file_path=str(file_path),
-                    )
-                    text = ""
-                all_text.append(text)
-            finally:
-                # Explicitly delete large objects to prevent memory growth
-                del pix
-                if img is not None:
-                    del img
+            text = ocr_page(page, dpi=dpi)
+            all_text.append(text)
 
             if (page_num + 1) % 10 == 0:
                 logger.info(

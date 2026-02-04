@@ -136,6 +136,9 @@ conakry/
   - Chunk size tuning: 1500 chars was a guess. Would want to experiment based on retrieval quality.
   - Reranking: After initial retrieval, could use a cross-encoder to rerank results before sending to the LLM.
   - OCR: I detect if a PDF might need OCR (scanned docs) but don't actually run it yet.
+  - Batch uploads: Allow the user to upload all their PDF files in a batch
+  - Figure out teh following bug: The issue is embedded fonts with corrupted encoding on pages 52-56. PyMuPDF is extracting binary garbage instead of readable text because these pages use fonts with broken or non-standard character mappings. - Feldman Appeal 0021 Appellants Opening Brief 050424.pdf - Contains NUL (0x00) characters in the
+  text that PostgreSQL cannot store
 
   Tech Stack
 

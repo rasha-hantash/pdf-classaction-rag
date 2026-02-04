@@ -7,6 +7,27 @@ import fitz  # PyMuPDF
 from pydantic import BaseModel
 
 from ..logger import logger
+from .ocr import ocr_page
+
+# Threshold for detecting garbage text (corrupted font encodings)
+GARBAGE_CONTROL_CHAR_RATIO = 0.1  # >10% control chars = garbage
+
+
+def _is_garbage_text(text: str) -> bool:
+    """Detect if extracted text is binary garbage from corrupted font encodings.
+
+    Args:
+        text: The extracted text to check.
+
+    Returns:
+        True if the text appears to be garbage (high ratio of control characters).
+    """
+    if not text or len(text) < 20:
+        return False
+    # Count control characters (0x00-0x1F) excluding common whitespace
+    control_chars = sum(1 for c in text if ord(c) < 32 and c not in "\n\t\r ")
+    ratio = control_chars / len(text)
+    return ratio > GARBAGE_CONTROL_CHAR_RATIO
 
 
 class TextBlock(BaseModel):
@@ -75,6 +96,9 @@ def _extract_spans_info(block_dict: dict) -> tuple[str, float, bool]:
         return "", 12.0, False
 
     combined_text = " ".join(texts)
+    # Remove NUL characters that can occur with corrupted font encodings
+    # PostgreSQL cannot store NUL (0x00) in text fields
+    combined_text = combined_text.replace("\x00", "")
     avg_font_size = statistics.mean(font_sizes) if font_sizes else 12.0
     is_bold = bold_count > total_spans / 2 if total_spans > 0 else False
 
@@ -143,39 +167,73 @@ def parse_pdf(file_path: str | Path) -> ParsedDocument:
 
         # Second pass: extract and classify blocks
         parsed_pages = []
+        ocr_pages_count = 0
         for page_num, page in enumerate(doc):
             page_dict = page.get_text("dict")
             blocks = []
 
-            for block_idx, block in enumerate(page_dict.get("blocks", [])):
-                if block.get("type") != 0:  # Skip non-text blocks (images, etc.)
-                    continue
+            # First, extract all text to check for garbage
+            page_texts = []
+            for block in page_dict.get("blocks", []):
+                if block.get("type") == 0:
+                    text, _, _ = _extract_spans_info(block)
+                    if text.strip():
+                        page_texts.append(text)
 
-                text, font_size, is_bold = _extract_spans_info(block)
-                if not text.strip():
-                    continue
+            combined_page_text = " ".join(page_texts)
 
-                bbox = block.get("bbox")
-                if bbox is None:
-                    logger.warn(
-                        "missing bbox for text block",
-                        file_path=str(file_path),
-                        page_number=page_num + 1,
-                        block_index=block_idx,
-                    )
-
-                block_type = _classify_block(text, font_size, median_size, is_bold)
-
-                blocks.append(
-                    TextBlock(
-                        block_index=block_idx,
-                        block_type=block_type,
-                        text=text,
-                        font_size=font_size,
-                        is_bold=is_bold,
-                        bbox=list(bbox) if bbox else None,
-                    )
+            # Check if this page has garbage text (corrupted font encoding)
+            if _is_garbage_text(combined_page_text):
+                logger.info(
+                    "garbage text detected, falling back to ocr",
+                    file_path=str(file_path),
+                    page_number=page_num + 1,
                 )
+                ocr_text = _ocr_page(page)
+                ocr_pages_count += 1
+                if ocr_text.strip():
+                    # Create a single block from OCR text
+                    blocks.append(
+                        TextBlock(
+                            block_index=0,
+                            block_type="paragraph",
+                            text=ocr_text.strip(),
+                            font_size=median_size,
+                            is_bold=False,
+                            bbox=None,
+                        )
+                    )
+            else:
+                # Normal extraction
+                for block_idx, block in enumerate(page_dict.get("blocks", [])):
+                    if block.get("type") != 0:  # Skip non-text blocks (images, etc.)
+                        continue
+
+                    text, font_size, is_bold = _extract_spans_info(block)
+                    if not text.strip():
+                        continue
+
+                    bbox = block.get("bbox")
+                    if bbox is None:
+                        logger.warn(
+                            "missing bbox for text block",
+                            file_path=str(file_path),
+                            page_number=page_num + 1,
+                            block_index=block_idx,
+                        )
+
+                    block_type = _classify_block(text, font_size, median_size, is_bold)
+
+                    blocks.append(
+                        TextBlock(
+                            block_index=block_idx,
+                            block_type=block_type,
+                            text=text,
+                            font_size=font_size,
+                            is_bold=is_bold,
+                            bbox=list(bbox) if bbox else None,
+                        )
+                    )
 
             # Extract tables using PyMuPDF's table finder
             tables = []
@@ -209,6 +267,7 @@ def parse_pdf(file_path: str | Path) -> ParsedDocument:
             total_pages=len(parsed_pages),
             total_blocks=sum(len(p.blocks) for p in parsed_pages),
             total_tables=sum(len(p.tables) for p in parsed_pages),
+            ocr_pages=ocr_pages_count,
         )
 
         return ParsedDocument(
