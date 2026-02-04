@@ -17,6 +17,12 @@ from .ingestion import (
     IngestResult,
     PathValidationError,
 )
+from .embeddings import (
+    EmbeddingClient,
+    EmbeddingResult,
+    generate_embedding,
+    generate_embeddings,
+)
 
 __all__ = [
     # Models
@@ -47,4 +53,9 @@ __all__ = [
     "validate_file_path",
     "IngestResult",
     "PathValidationError",
+    # Embeddings
+    "EmbeddingClient",
+    "EmbeddingResult",
+    "generate_embedding",
+    "generate_embeddings",
 ]
