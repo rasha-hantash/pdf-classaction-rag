@@ -59,15 +59,6 @@ curl -X POST http://localhost:8000/api/v1/rag/ingest \
   -F "file=@document.pdf"
 ```
 
-Response:
-```json
-{
-  "document_id": "uuid-here",
-  "file_path": "document.pdf",
-  "chunks_count": 42,
-  "was_duplicate": false
-}
-```
 
 ### Query the documents
 
@@ -77,20 +68,6 @@ curl -X POST http://localhost:8000/api/v1/rag/query \
   -d '{"question": "What is this document about?", "top_k": 5}'
 ```
 
-Response:
-```json
-{
-  "answer": "The document discusses...",
-  "sources": [
-    {
-      "file_path": "document.pdf",
-      "page_number": 1,
-      "content_preview": "First 200 characters..."
-    }
-  ],
-  "chunks_used": 5
-}
-```
 
 ## Running Tests
 
@@ -120,3 +97,49 @@ conakry/
 │       └── ocr.py              # OCR detection
 └── tests/
 ```
+
+
+ ---                                                                                                                                                                                                        
+  What I Built: PDF RAG Pipeline                                                                                                                                                                           
+                                                                                                                                                                                                             
+  A retrieval-augmented generation system for querying legal documents (Facebook privacy settlement PDFs).                                                                                                 
+
+  The Pipeline
+
+  1. Ingestion
+  - Parse PDFs using PyMuPDF (fitz) → extracts text blocks, tables, page numbers
+  - Chunk the content (more on this below)
+  - Generate embeddings via OpenAI text-embedding-3-small (1536 dimensions)
+  - Store in PostgreSQL with pgvector extension
+
+  2. Retrieval
+  - User asks a question → generate embedding for the query
+  - Cosine similarity search against stored chunks (using pgvector's <=> operator)
+  - Return top-k most relevant chunks
+
+  3. Generation
+  - Build context from retrieved chunks (includes source file, page number)
+  - Send to Claude with a system prompt that says "only use the provided context"
+  - Return answer + source references
+
+  Chunking Strategy
+
+  I have two options:
+  - Semantic chunking: Splits by paragraph boundaries (double newlines), merges small paragraphs together up to ~1500 chars. Falls back to fixed-size if a single paragraph is huge.
+  - Fixed-size chunking: 1000 chars with 200 char overlap, tries to break at word boundaries.
+
+  I went with semantic as the default because legal docs have natural paragraph structure, and keeping paragraphs intact preserves meaning better than arbitrary cuts.
+
+  A Few Things I'd Improve
+
+  - Hybrid search: Add BM25/keyword search alongside vector search. Legal docs have specific terms (case numbers, dates) that exact match would catch better.
+  - Chunk size tuning: 1500 chars was a guess. Would want to experiment based on retrieval quality.
+  - Reranking: After initial retrieval, could use a cross-encoder to rerank results before sending to the LLM.
+  - OCR: I detect if a PDF might need OCR (scanned docs) but don't actually run it yet.
+
+  Tech Stack
+
+  - Python, FastAPI
+  - PostgreSQL + pgvector
+  - OpenAI embeddings, Claude for generation
+  - PyMuPDF for PDF parsing
