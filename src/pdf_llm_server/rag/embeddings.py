@@ -4,6 +4,7 @@ import os
 import time
 from dataclasses import dataclass, field
 
+import tiktoken
 from openai import OpenAI, RateLimitError, APIStatusError
 
 from ..logger import logger
@@ -11,23 +12,39 @@ from ..logger import logger
 # Constants
 MODEL = "text-embedding-3-small"
 EMBEDDING_DIMENSIONS = 1536
-MAX_TOKENS_PER_BATCH = 100_000
+MAX_TOKENS_PER_BATCH = 8191  # OpenAI's limit for text-embedding-3-small
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY_SECONDS = 1
 
+# Tokenizer for accurate token counting (text-embedding-3-small uses cl100k_base)
+_tokenizer = tiktoken.get_encoding("cl100k_base")
 
-def estimate_tokens(text: str) -> int:
-    """Estimate token count for a text string.
 
-    Uses the approximation of 4 characters per token.
+def count_tokens(text: str) -> int:
+    """Count tokens for a text string using tiktoken.
+
+    Uses the cl100k_base encoding which is used by text-embedding-3-small.
 
     Args:
-        text: The text to estimate tokens for.
+        text: The text to count tokens for.
 
     Returns:
-        Estimated token count.
+        Exact token count.
     """
-    return len(text) // 4
+    return len(_tokenizer.encode(text))
+
+
+@dataclass
+class BatchResult:
+    """Result of a single batch embedding generation.
+
+    Attributes:
+        embeddings: List of embedding vectors. None for texts that failed.
+        error: Error message if the batch failed, None otherwise.
+    """
+
+    embeddings: list[list[float] | None]
+    error: str | None
 
 
 @dataclass
@@ -69,12 +86,12 @@ class EmbeddingClient:
         Args:
             api_key: OpenAI API key. If not provided, uses OPENAI_API_KEY env var.
         """
-        self._api_key = api_key or os.getenv("OPENAI_API_KEY")
-        if not self._api_key:
+        api_key = api_key or os.getenv("OPENAI_API_KEY")
+        if not api_key:
             raise ValueError(
                 "OpenAI API key required: provide api_key or set OPENAI_API_KEY"
             )
-        self._client = OpenAI(api_key=self._api_key)
+        self._client = OpenAI(api_key=api_key)
 
     def generate_embedding(self, text: str) -> list[float]:
         """Generate embedding for a single text.
@@ -124,13 +141,13 @@ class EmbeddingClient:
             )
 
             # Merge batch results into overall result
-            for i, embedding in zip(indices, batch_result["embeddings"]):
+            for i, embedding in zip(indices, batch_result.embeddings):
                 result.embeddings[i] = embedding
 
-            if batch_result["error"]:
+            if batch_result.error:
                 for i in indices:
                     result.failed_indices.append(i)
-                    result.errors[i] = batch_result["error"]
+                    result.errors[i] = batch_result.error
 
         return result
 
@@ -148,7 +165,7 @@ class EmbeddingClient:
         current_tokens = 0
 
         for text in texts:
-            text_tokens = estimate_tokens(text)
+            text_tokens = count_tokens(text)
 
             # If single text exceeds limit, it gets its own batch
             if text_tokens >= MAX_TOKENS_PER_BATCH:
@@ -202,7 +219,7 @@ class EmbeddingClient:
         original_indices: list[int],
         batch_idx: int,
         total_batches: int,
-    ) -> dict:
+    ) -> BatchResult:
         """Generate embeddings for a batch with exponential backoff retry.
 
         Args:
@@ -212,7 +229,7 @@ class EmbeddingClient:
             total_batches: Total number of batches (for logging).
 
         Returns:
-            Dict with 'embeddings' (list, may contain None) and 'error' (str or None).
+            BatchResult with embeddings (None for failures) and error message.
         """
         last_error = None
 
@@ -238,12 +255,12 @@ class EmbeddingClient:
                     duration_ms=round(duration_ms, 2),
                 )
 
-                return {"embeddings": embeddings, "error": None}
+                return BatchResult(embeddings=embeddings, error=None)
 
             except RateLimitError as e:
                 last_error = str(e)
                 delay = INITIAL_RETRY_DELAY_SECONDS * (2**attempt)  # 1s, 2s, 4s
-                logger.warning(
+                logger.warn(
                     "rate limit hit, retrying",
                     attempt=attempt + 1,
                     max_retries=MAX_RETRIES,
@@ -256,7 +273,7 @@ class EmbeddingClient:
                 if e.status_code >= 500:
                     last_error = str(e)
                     delay = INITIAL_RETRY_DELAY_SECONDS * (2**attempt)
-                    logger.warning(
+                    logger.warn(
                         "server error, retrying",
                         attempt=attempt + 1,
                         max_retries=MAX_RETRIES,
@@ -274,7 +291,7 @@ class EmbeddingClient:
                         status_code=e.status_code,
                         error=last_error,
                     )
-                    return {"embeddings": [None] * len(texts), "error": last_error}
+                    return BatchResult(embeddings=[None] * len(texts), error=last_error)
 
             except Exception as e:
                 last_error = str(e)
@@ -283,7 +300,7 @@ class EmbeddingClient:
                     batch=f"{batch_idx + 1}/{total_batches}",
                     error=last_error,
                 )
-                return {"embeddings": [None] * len(texts), "error": last_error}
+                return BatchResult(embeddings=[None] * len(texts), error=last_error)
 
         # All retries exhausted
         logger.error(
@@ -292,7 +309,7 @@ class EmbeddingClient:
             max_retries=MAX_RETRIES,
             error=last_error,
         )
-        return {"embeddings": [None] * len(texts), "error": last_error}
+        return BatchResult(embeddings=[None] * len(texts), error=last_error)
 
 
 # Convenience functions for module-level access

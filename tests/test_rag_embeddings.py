@@ -6,29 +6,31 @@ from unittest.mock import Mock, patch
 from pdf_llm_server.rag.embeddings import (
     EmbeddingClient,
     EmbeddingResult,
-    estimate_tokens,
+    count_tokens,
     MAX_TOKENS_PER_BATCH,
 )
 
 
-class TestEstimateTokens:
-    def test_estimate_tokens_empty_string(self):
-        assert estimate_tokens("") == 0
+class TestCountTokens:
+    def test_count_tokens_empty_string(self):
+        assert count_tokens("") == 0
 
-    def test_estimate_tokens_short_string(self):
-        # "hello" is 5 chars, 5 // 4 = 1
-        assert estimate_tokens("hello") == 1
+    def test_count_tokens_short_string(self):
+        # tiktoken gives exact count for "hello"
+        assert count_tokens("hello") == 1
 
-    def test_estimate_tokens_longer_string(self):
-        # 100 chars should be ~25 tokens
+    def test_count_tokens_longer_string(self):
+        # 100 'a' characters - tiktoken encodes this efficiently
         text = "a" * 100
-        assert estimate_tokens(text) == 25
+        token_count = count_tokens(text)
+        assert token_count > 0
+        assert token_count < 100  # Should be much less than char count
 
-    def test_estimate_tokens_realistic_text(self):
-        # Typical sentence
+    def test_count_tokens_realistic_text(self):
+        # Typical sentence - tiktoken gives precise count
         text = "The quick brown fox jumps over the lazy dog."
-        # 44 chars // 4 = 11 tokens
-        assert estimate_tokens(text) == 11
+        token_count = count_tokens(text)
+        assert token_count == 10  # Exact count from cl100k_base
 
 
 class TestEmbeddingResult:
@@ -72,21 +74,19 @@ class TestEmbeddingResult:
 class TestEmbeddingClientInit:
     def test_init_with_api_key(self):
         with patch("pdf_llm_server.rag.embeddings.OpenAI") as mock_openai:
-            client = EmbeddingClient(api_key="test-key")
+            _ = EmbeddingClient(api_key="test-key")
             mock_openai.assert_called_once_with(api_key="test-key")
 
     def test_init_from_env(self):
         with patch("pdf_llm_server.rag.embeddings.OpenAI") as mock_openai:
             with patch.dict("os.environ", {"OPENAI_API_KEY": "env-key"}):
-                client = EmbeddingClient()
+                _ = EmbeddingClient()
                 mock_openai.assert_called_once_with(api_key="env-key")
 
     def test_init_no_key_raises(self):
         with patch.dict("os.environ", {}, clear=True):
-            # Ensure OPENAI_API_KEY is not set
-            with patch("os.getenv", return_value=None):
-                with pytest.raises(ValueError, match="OpenAI API key required"):
-                    EmbeddingClient()
+            with pytest.raises(ValueError, match="OpenAI API key required"):
+                EmbeddingClient()
 
 
 class TestGenerateEmbeddingSingle:
@@ -199,10 +199,11 @@ class TestGenerateEmbeddingsBatch:
 class TestGenerateEmbeddingsLargeBatchSplits:
     def test_generate_embeddings_large_batch_splits(self):
         """Test that large batches are split based on token count."""
-        # Create texts that will exceed MAX_TOKENS_PER_BATCH
-        # Each text is 50k tokens (200k chars), so 2 texts = 100k tokens (needs split)
-        large_text = "a" * 200_000  # ~50k tokens
-        texts = [large_text, large_text, large_text]  # ~150k tokens total, needs 2 batches
+        # Create texts that will exceed MAX_TOKENS_PER_BATCH (8191 tokens)
+        # Each text needs to be large enough that 2 texts exceed the limit
+        # Using repeated words to get predictable token counts
+        large_text = "hello world " * 2000  # ~4000 tokens each
+        texts = [large_text, large_text, large_text]  # ~12000 tokens total, needs 2 batches
 
         mock_embedding = [0.1] * 1536
 
@@ -368,10 +369,11 @@ class TestRetryAndPartialFailure:
         from openai import RateLimitError
 
         mock_embedding = [0.1] * 1536
-        # Create 3 texts that will be split into 2 batches:
-        # - Batch 1: texts 0 and 1 (50k + 50k = 100k tokens, exactly at limit)
-        # - Batch 2: text 2 (50k tokens)
-        large_text = "a" * 200_000  # ~50k tokens
+        # Create 3 texts that will be split into multiple batches
+        # Each text is ~4000 tokens, so with 8191 limit we get:
+        # - Batch 1: text 0 and 1 (~8000 tokens)
+        # - Batch 2: text 2 (~4000 tokens)
+        large_text = "hello world " * 2000  # ~4000 tokens
         texts = [large_text, large_text, large_text]
 
         with patch("pdf_llm_server.rag.embeddings.OpenAI") as mock_openai_class:
