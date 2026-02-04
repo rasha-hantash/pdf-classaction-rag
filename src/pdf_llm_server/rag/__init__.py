@@ -23,6 +23,11 @@ from .embeddings import (
     generate_embedding,
     generate_embeddings,
 )
+from .retriever import (
+    RAGRetriever,
+    RAGResponse,
+    SourceReference,
+)
 
 __all__ = [
     # Models
@@ -58,4 +63,8 @@ __all__ = [
     "EmbeddingResult",
     "generate_embedding",
     "generate_embeddings",
+    # Retriever
+    "RAGRetriever",
+    "RAGResponse",
+    "SourceReference",
 ]

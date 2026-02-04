@@ -116,7 +116,7 @@ def ocr_pdf_with_tesseract(file_path: str | Path, dpi: int = 300) -> str:
                 try:
                     text = pytesseract.image_to_string(img, timeout=30)
                 except RuntimeError:
-                    logger.warning(
+                    logger.warn(
                         "ocr timeout on page",
                         page_num=page_num + 1,
                         file_path=str(file_path),

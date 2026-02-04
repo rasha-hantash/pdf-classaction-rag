@@ -279,7 +279,7 @@ class PgVectorStore:
                             chunk.chunk_type,
                             chunk.page_number,
                             chunk.position,
-                            None,  # embedding - added by separate process
+                            chunk.embedding,
                             Json(chunk.bbox) if chunk.bbox else None,
                         )
                         for chunk in chunks
