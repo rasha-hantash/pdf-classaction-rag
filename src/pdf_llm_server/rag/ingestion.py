@@ -156,6 +156,18 @@ def ingest_document(
         embedding_result = embedding_client.generate_embeddings(texts)
         embed_duration_ms = (time.perf_counter() - embed_start) * 1000
 
+        # Validate embedding count matches chunk count
+        if len(embedding_result.embeddings) != len(chunk_data_list):
+            logger.error(
+                "embedding count mismatch",
+                file_path=str(file_path),
+                expected=len(chunk_data_list),
+                received=len(embedding_result.embeddings),
+            )
+            raise ValueError(
+                f"Embedding count mismatch: expected {len(chunk_data_list)}, got {len(embedding_result.embeddings)}"
+            )
+
         # Assign embeddings to chunks
         for i, chunk in enumerate(chunk_data_list):
             chunk.embedding = embedding_result.embeddings[i]

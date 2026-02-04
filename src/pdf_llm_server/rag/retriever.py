@@ -199,6 +199,8 @@ Please answer the question based only on the provided context."""
         )
         generation_duration_ms = (time.perf_counter() - generation_start) * 1000
 
+        if not response.content:
+            raise ValueError("Empty response from Claude API")
         answer = response.content[0].text
 
         # Build source references
