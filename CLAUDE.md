@@ -88,6 +88,111 @@ return result
 
 This prevents file handle leaks which can cause "too many open files" errors in long-running processes.
 
+## Multi-Table Operations
+
+### Use database transactions for atomic multi-table inserts
+
+When inserting records across multiple tables (e.g., document + chunks), use a single database transaction so both operations succeed or fail together:
+
+```python
+def insert_document_with_chunks(self, file_hash, file_path, chunks, metadata=None):
+    """Insert document and chunks atomically in a single transaction."""
+    try:
+        with self.conn.cursor() as cur:
+            # Insert document
+            cur.execute("INSERT INTO documents (...) VALUES (...) RETURNING *", ...)
+            doc = cur.fetchone()
+
+            # Insert chunks with the document_id
+            if chunks:
+                execute_values(cur, "INSERT INTO chunks (...) VALUES %s", ...)
+
+        # Commit both operations together
+        self.conn.commit()
+        return doc, chunks
+    except Exception:
+        self.conn.rollback()
+        raise
+```
+
+This ensures atomic operations - if chunk insertion fails, the document insertion is also rolled back automatically.
+
+## Batch Operation Patterns
+
+### Track failures in batch results
+
+When processing batches, include failed items in results with error information rather than silently skipping them:
+
+```python
+class BatchResult(BaseModel):
+    item: Item | None = None
+    error: str | None = None
+
+def process_batch(items: list[Item]) -> list[BatchResult]:
+    results = []
+    for item in items:
+        try:
+            processed = process_item(item)
+            results.append(BatchResult(item=processed))
+        except Exception as e:
+            logger.error("failed to process item", item_id=item.id, error=str(e))
+            results.append(BatchResult(error=str(e)))
+    return results
+```
+
+This allows callers to:
+1. Know exactly which items failed and why
+2. Retry only failed items
+3. Generate accurate success/failure reports
+
+### Sequential vs Parallel Batch Processing
+
+For I/O-bound operations like PDF ingestion, parallel processing can improve throughput. Here's the pattern:
+
+**Sequential (simpler, use for debugging or when order matters):**
+
+```python
+def ingest_batch(self, file_paths: list[Path]) -> list[IngestResult]:
+    results = []
+    for file_path in file_paths:
+        try:
+            result = self.ingest(file_path)
+            results.append(result)
+        except Exception as e:
+            results.append(IngestResult(error=str(e)))
+    return results
+```
+
+**Parallel (with ThreadPoolExecutor for I/O-bound tasks):**
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def ingest_batch(self, file_paths: list[Path], max_workers: int = 4) -> list[IngestResult]:
+    results_dict: dict[int, IngestResult] = {}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {
+            executor.submit(self._ingest_worker, fp): i
+            for i, fp in enumerate(file_paths)
+        }
+
+        for future in as_completed(future_to_index):
+            idx = future_to_index[future]
+            try:
+                results_dict[idx] = future.result()
+            except Exception as e:
+                results_dict[idx] = IngestResult(error=str(e))
+
+    # Preserve input order
+    return [results_dict[i] for i in range(len(file_paths))]
+```
+
+**Important:** When using parallel processing with database connections:
+- psycopg2 connections are NOT thread-safe
+- Each worker thread must create its own connection
+- Store the connection string (not the connection) in the class
+
 ## Testing Patterns
 
 ### 1. Use explicit table truncation for test isolation

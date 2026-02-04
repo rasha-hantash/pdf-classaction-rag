@@ -1,4 +1,50 @@
 from .models import IngestedDocument, ChunkRecord, SearchResult
 from .database import PgVectorStore
+from .pdf_parser import parse_pdf, ParsedDocument, ParsedPage, TextBlock, TableData
+from .chunking import (
+    fixed_size_chunking,
+    semantic_chunking_by_paragraphs,
+    chunk_parsed_document,
+    detect_content_type,
+    ChunkData,
+)
+from .ocr import assess_needs_ocr, ocr_pdf_with_tesseract
+from .ingestion import (
+    RAGIngestionPipeline,
+    ingest_document,
+    compute_file_hash,
+    validate_file_path,
+    IngestResult,
+    PathValidationError,
+)
 
-__all__ = ["IngestedDocument", "ChunkRecord", "SearchResult", "PgVectorStore"]
+__all__ = [
+    # Models
+    "IngestedDocument",
+    "ChunkRecord",
+    "SearchResult",
+    # Database
+    "PgVectorStore",
+    # PDF Parser
+    "parse_pdf",
+    "ParsedDocument",
+    "ParsedPage",
+    "TextBlock",
+    "TableData",
+    # Chunking
+    "fixed_size_chunking",
+    "semantic_chunking_by_paragraphs",
+    "chunk_parsed_document",
+    "detect_content_type",
+    "ChunkData",
+    # OCR
+    "assess_needs_ocr",
+    "ocr_pdf_with_tesseract",
+    # Ingestion
+    "RAGIngestionPipeline",
+    "ingest_document",
+    "compute_file_hash",
+    "validate_file_path",
+    "IngestResult",
+    "PathValidationError",
+]
