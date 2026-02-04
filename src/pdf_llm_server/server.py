@@ -1,5 +1,6 @@
 """FastAPI REST API for the RAG pipeline."""
 
+import asyncio
 import shutil
 import tempfile
 from contextlib import asynccontextmanager
@@ -20,7 +21,8 @@ from .rag import (
     ingest_document,
 )
 
-MIGRATIONS_DIR = Path(__file__).parent.parent.parent / "migrations"
+# Maximum file size for uploads (50MB)
+MAX_UPLOAD_SIZE = 50 * 1024 * 1024
 
 
 # --- Request/Response Models ---
@@ -111,17 +113,6 @@ async def lifespan(app: FastAPI):
     db = PgVectorStore()
     db.connect()
 
-    try:
-        db.run_migrations(MIGRATIONS_DIR)
-    except Exception as e:
-        # Migrations may already be applied - log and continue
-        # Check for psycopg2 duplicate object errors (table/index already exists)
-        error_msg = str(e).lower()
-        if "duplicate" in error_msg or "already exists" in error_msg:
-            logger.info("migrations already applied")
-        else:
-            raise
-
     yield
 
     if db:
@@ -185,22 +176,59 @@ async def ready():
 # --- RAG Endpoints ---
 
 
+def _validate_pdf_content(file_path: Path) -> bool:
+    """Validate file is a PDF by checking magic bytes."""
+    with open(file_path, "rb") as f:
+        header = f.read(5)
+    return header == b"%PDF-"
+
+
+def _save_upload_to_temp(file_obj, tmp_path: Path) -> None:
+    """Save uploaded file to temp path."""
+    with open(tmp_path, "wb") as f:
+        shutil.copyfileobj(file_obj, f)
+
+
+def _run_ingest(tmp_path: Path, db_instance, embedding_client):
+    """Run the synchronous ingest operation."""
+    return ingest_document(
+        file_path=tmp_path,
+        db=db_instance,
+        embedding_client=embedding_client,
+    )
+
+
 @app.post("/api/v1/rag/ingest", response_model=IngestResponse)
 async def ingest_file(file: UploadFile = File(...)):
     """Ingest a PDF file via upload."""
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
-    # Save to temp file
+    # Check file size
+    if file.size and file.size > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)}MB",
+        )
+
+    # Save to temp file (run in thread pool to avoid blocking)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp_path = Path(tmp.name)
-        shutil.copyfileobj(file.file, tmp)
 
     try:
-        result = ingest_document(
-            file_path=tmp_path,
-            db=db,
-            embedding_client=get_embedding_client(),
+        await asyncio.to_thread(_save_upload_to_temp, file.file, tmp_path)
+
+        # Validate PDF magic bytes
+        is_valid_pdf = await asyncio.to_thread(_validate_pdf_content, tmp_path)
+        if not is_valid_pdf:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid PDF file. File does not have valid PDF header.",
+            )
+
+        # Run ingestion in thread pool to avoid blocking event loop
+        result = await asyncio.to_thread(
+            _run_ingest, tmp_path, db, get_embedding_client()
         )
         if result.error:
             raise HTTPException(status_code=500, detail=result.error)
@@ -217,7 +245,10 @@ async def ingest_file(file: UploadFile = File(...)):
 @app.post("/api/v1/rag/query", response_model=QueryResponse)
 async def query(request: QueryRequest):
     """Answer a question using RAG."""
-    response = get_retriever().query(request.question, top_k=request.top_k)
+    # Run in thread pool to avoid blocking event loop (DB + LLM calls)
+    response = await asyncio.to_thread(
+        get_retriever().query, request.question, top_k=request.top_k
+    )
     return QueryResponse(
         answer=response.answer,
         sources=[
@@ -235,7 +266,8 @@ async def query(request: QueryRequest):
 @app.get("/api/v1/rag/documents", response_model=DocumentListResponse)
 async def list_documents():
     """List all ingested documents."""
-    docs = db.get_documents()
+    # Run in thread pool to avoid blocking event loop
+    docs = await asyncio.to_thread(db.get_documents)
     return DocumentListResponse(
         documents=[
             DocumentResponse(
@@ -254,7 +286,8 @@ async def list_documents():
 @app.delete("/api/v1/rag/documents/{document_id}", response_model=DeleteResponse)
 async def delete_document(document_id: UUID):
     """Delete a document and its chunks."""
-    deleted = db.delete_document(document_id)
+    # Run in thread pool to avoid blocking event loop
+    deleted = await asyncio.to_thread(db.delete_document, document_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
     return DeleteResponse(deleted=True, document_id=document_id)
