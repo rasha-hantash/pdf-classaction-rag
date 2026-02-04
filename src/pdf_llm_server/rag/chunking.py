@@ -15,6 +15,7 @@ class ChunkData(BaseModel):
     page_number: int
     position: int
     bbox: list[float] | None = None
+    embedding: list[float] | None = None
 
 
 def fixed_size_chunking(

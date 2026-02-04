@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from ..logger import logger
 from .chunking import ChunkData, chunk_parsed_document
 from .database import PgVectorStore
+from .embeddings import EmbeddingClient
 from .models import IngestedDocument
 from .ocr import assess_needs_ocr
 from .pdf_parser import parse_pdf
@@ -88,6 +89,7 @@ def compute_file_hash(file_path: str | Path) -> str:
 def ingest_document(
     file_path: str | Path,
     db: PgVectorStore,
+    embedding_client: EmbeddingClient | None = None,
     metadata: dict | None = None,
     chunking_strategy: str = "semantic",
     allowed_dirs: list[Path] | None = None,
@@ -97,6 +99,8 @@ def ingest_document(
     Args:
         file_path: Path to the PDF file.
         db: PgVectorStore database connection.
+        embedding_client: Optional EmbeddingClient for generating embeddings.
+            If None, chunks are stored without embeddings.
         metadata: Optional metadata to attach to the document.
         chunking_strategy: "semantic" or "fixed" chunking strategy.
         allowed_dirs: Optional list of allowed directories for path validation.
@@ -133,7 +137,7 @@ def ingest_document(
     # Step 3: Assess OCR needs
     needs_ocr = assess_needs_ocr(file_path)
     if needs_ocr:
-        logger.warning(
+        logger.warn(
             "document may need ocr",
             file_path=str(file_path),
             message="Text extraction may be incomplete for scanned documents",
@@ -145,7 +149,34 @@ def ingest_document(
     # Step 5: Chunk content
     chunk_data_list = chunk_parsed_document(parsed_doc, strategy=chunking_strategy)
 
-    # Step 6: Insert document and chunks atomically in a single transaction
+    # Step 6: Generate embeddings for chunks
+    if embedding_client and chunk_data_list:
+        texts = [chunk.content for chunk in chunk_data_list]
+        embed_start = time.perf_counter()
+        embedding_result = embedding_client.generate_embeddings(texts)
+        embed_duration_ms = (time.perf_counter() - embed_start) * 1000
+
+        # Assign embeddings to chunks
+        for i, chunk in enumerate(chunk_data_list):
+            chunk.embedding = embedding_result.embeddings[i]
+
+        if embedding_result.failed_indices:
+            logger.warn(
+                "some embeddings failed",
+                file_path=str(file_path),
+                failed_count=len(embedding_result.failed_indices),
+                total_count=len(texts),
+            )
+
+        logger.info(
+            "embeddings generated",
+            file_path=str(file_path),
+            chunks_count=len(texts),
+            success_count=embedding_result.success_count,
+            duration_ms=round(embed_duration_ms, 2),
+        )
+
+    # Step 7: Insert document and chunks atomically in a single transaction
     document, chunk_records = db.insert_document_with_chunks(
         file_hash=file_hash,
         file_path=str(file_path),
@@ -175,6 +206,7 @@ class RAGIngestionPipeline:
     def __init__(
         self,
         db: PgVectorStore,
+        embedding_client: EmbeddingClient | None = None,
         chunking_strategy: str = "semantic",
         allowed_dirs: list[Path] | None = None,
     ):
@@ -182,11 +214,14 @@ class RAGIngestionPipeline:
 
         Args:
             db: PgVectorStore database connection.
+            embedding_client: Optional EmbeddingClient for generating embeddings.
+                If None, chunks are stored without embeddings.
             chunking_strategy: Default chunking strategy ("semantic" or "fixed").
             allowed_dirs: Optional list of allowed directories for path validation.
                 If provided, all ingested files must be within these directories.
         """
         self.db = db
+        self.embedding_client = embedding_client
         self.chunking_strategy = chunking_strategy
         self.allowed_dirs = allowed_dirs
         # Store connection string for creating worker connections in parallel mode
@@ -209,6 +244,7 @@ class RAGIngestionPipeline:
         return ingest_document(
             file_path=file_path,
             db=self.db,
+            embedding_client=self.embedding_client,
             metadata=metadata,
             chunking_strategy=self.chunking_strategy,
             allowed_dirs=self.allowed_dirs,
@@ -222,6 +258,7 @@ class RAGIngestionPipeline:
         """Worker function for parallel ingestion with its own DB connection.
 
         Creates a new database connection for thread safety.
+        OpenAI client is thread-safe, so we reuse the embedding_client.
         """
         worker_db = PgVectorStore(self._connection_string)
         worker_db.connect()
@@ -229,6 +266,7 @@ class RAGIngestionPipeline:
             return ingest_document(
                 file_path=file_path,
                 db=worker_db,
+                embedding_client=self.embedding_client,
                 metadata=metadata,
                 chunking_strategy=self.chunking_strategy,
                 allowed_dirs=self.allowed_dirs,
