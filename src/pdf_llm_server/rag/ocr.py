@@ -107,13 +107,27 @@ def ocr_pdf_with_tesseract(file_path: str | Path, dpi: int = 300) -> str:
             # Render page to image
             mat = fitz.Matrix(dpi / 72, dpi / 72)
             pix = page.get_pixmap(matrix=mat)
+            img = None
+            try:
+                # Convert to PIL Image
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
-            # Convert to PIL Image
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-
-            # Run OCR
-            text = pytesseract.image_to_string(img)
-            all_text.append(text)
+                # Run OCR with timeout protection
+                try:
+                    text = pytesseract.image_to_string(img, timeout=30)
+                except RuntimeError:
+                    logger.warning(
+                        "ocr timeout on page",
+                        page_num=page_num + 1,
+                        file_path=str(file_path),
+                    )
+                    text = ""
+                all_text.append(text)
+            finally:
+                # Explicitly delete large objects to prevent memory growth
+                del pix
+                if img is not None:
+                    del img
 
             if (page_num + 1) % 10 == 0:
                 logger.info(

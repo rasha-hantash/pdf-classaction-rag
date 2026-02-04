@@ -2,6 +2,7 @@
 
 import hashlib
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -14,6 +15,12 @@ from .ocr import assess_needs_ocr
 from .pdf_parser import parse_pdf
 
 
+class PathValidationError(ValueError):
+    """Raised when a file path fails security validation."""
+
+    pass
+
+
 class IngestResult(BaseModel):
     """Result of a document ingestion."""
 
@@ -21,6 +28,40 @@ class IngestResult(BaseModel):
     chunks_count: int = 0
     was_duplicate: bool = False
     error: str | None = None
+
+
+def validate_file_path(
+    file_path: Path, allowed_dirs: list[Path] | None = None
+) -> Path:
+    """Validate a file path to prevent directory traversal attacks.
+
+    Args:
+        file_path: Path to validate.
+        allowed_dirs: Optional list of allowed directories. If provided,
+            the resolved path must be within one of these directories.
+
+    Returns:
+        Resolved absolute path.
+
+    Raises:
+        PathValidationError: If path is outside allowed directories.
+        FileNotFoundError: If the file does not exist.
+    """
+    resolved = file_path.resolve()
+
+    if not resolved.exists():
+        raise FileNotFoundError(f"File not found: {resolved}")
+
+    if allowed_dirs is not None:
+        allowed_resolved = [d.resolve() for d in allowed_dirs]
+        if not any(
+            resolved.is_relative_to(allowed_dir) for allowed_dir in allowed_resolved
+        ):
+            raise PathValidationError(
+                f"Path {resolved} is not within allowed directories"
+            )
+
+    return resolved
 
 
 def compute_file_hash(file_path: str | Path) -> str:
@@ -44,14 +85,12 @@ def compute_file_hash(file_path: str | Path) -> str:
     return sha256.hexdigest()
 
 
-# TODO: Add path traversal validation before public deployment.
-# file_path should be validated to prevent directory traversal attacks
-# (e.g., ensure resolved path is within allowed directories).
 def ingest_document(
     file_path: str | Path,
     db: PgVectorStore,
     metadata: dict | None = None,
     chunking_strategy: str = "semantic",
+    allowed_dirs: list[Path] | None = None,
 ) -> IngestResult:
     """Ingest a single PDF document into the RAG system.
 
@@ -60,11 +99,21 @@ def ingest_document(
         db: PgVectorStore database connection.
         metadata: Optional metadata to attach to the document.
         chunking_strategy: "semantic" or "fixed" chunking strategy.
+        allowed_dirs: Optional list of allowed directories for path validation.
+            If provided, file_path must be within one of these directories.
 
     Returns:
         IngestResult with document info and chunk count.
+
+    Raises:
+        PathValidationError: If file_path is outside allowed directories.
     """
     file_path = Path(file_path)
+
+    # Validate path if allowed_dirs is specified
+    if allowed_dirs is not None:
+        file_path = validate_file_path(file_path, allowed_dirs)
+
     start = time.perf_counter()
 
     # Step 1: Compute file hash for deduplication
@@ -127,15 +176,21 @@ class RAGIngestionPipeline:
         self,
         db: PgVectorStore,
         chunking_strategy: str = "semantic",
+        allowed_dirs: list[Path] | None = None,
     ):
         """Initialize the ingestion pipeline.
 
         Args:
             db: PgVectorStore database connection.
             chunking_strategy: Default chunking strategy ("semantic" or "fixed").
+            allowed_dirs: Optional list of allowed directories for path validation.
+                If provided, all ingested files must be within these directories.
         """
         self.db = db
         self.chunking_strategy = chunking_strategy
+        self.allowed_dirs = allowed_dirs
+        # Store connection string for creating worker connections in parallel mode
+        self._connection_string = db.connection_string
 
     def ingest(
         self,
@@ -156,48 +211,118 @@ class RAGIngestionPipeline:
             db=self.db,
             metadata=metadata,
             chunking_strategy=self.chunking_strategy,
+            allowed_dirs=self.allowed_dirs,
         )
+
+    def _ingest_worker(
+        self,
+        file_path: str | Path,
+        metadata: dict | None,
+    ) -> IngestResult:
+        """Worker function for parallel ingestion with its own DB connection.
+
+        Creates a new database connection for thread safety.
+        """
+        worker_db = PgVectorStore(self._connection_string)
+        worker_db.connect()
+        try:
+            return ingest_document(
+                file_path=file_path,
+                db=worker_db,
+                metadata=metadata,
+                chunking_strategy=self.chunking_strategy,
+                allowed_dirs=self.allowed_dirs,
+            )
+        finally:
+            worker_db.disconnect()
 
     def ingest_batch(
         self,
         file_paths: list[str | Path],
         metadata: dict | None = None,
+        max_workers: int = 4,
     ) -> list[IngestResult]:
-        """Ingest multiple documents.
+        """Ingest multiple documents in parallel.
 
         Args:
             file_paths: List of paths to PDF files.
             metadata: Optional metadata to attach to all documents.
+            max_workers: Maximum number of parallel workers (default: 4).
+                Set to 1 for sequential processing.
 
         Returns:
-            List of IngestResult objects.
+            List of IngestResult objects in the same order as input file_paths.
         """
-        results = []
         total = len(file_paths)
+        if total == 0:
+            return []
 
-        logger.info("starting batch ingestion", total_files=total)
+        logger.info(
+            "starting batch ingestion",
+            total_files=total,
+            max_workers=max_workers,
+        )
         start = time.perf_counter()
 
-        for i, file_path in enumerate(file_paths, 1):
-            try:
-                result = self.ingest(file_path, metadata)
-                results.append(result)
-            except Exception as e:
-                logger.error(
-                    "failed to ingest document",
-                    file_path=str(file_path),
-                    error=str(e),
-                )
-                # Track failed file in results
-                results.append(IngestResult(error=str(e)))
+        # Use dict to preserve order: index -> result
+        results_dict: dict[int, IngestResult] = {}
 
-            if i % 10 == 0 or i == total:
-                logger.info(
-                    "batch progress",
-                    processed=i,
-                    total=total,
-                    percent=round(i / total * 100, 1),
-                )
+        if max_workers == 1:
+            # Sequential processing (original behavior)
+            for i, file_path in enumerate(file_paths):
+                try:
+                    result = self.ingest(file_path, metadata)
+                    results_dict[i] = result
+                except Exception as e:
+                    logger.error(
+                        "failed to ingest document",
+                        file_path=str(file_path),
+                        error=str(e),
+                    )
+                    results_dict[i] = IngestResult(error=str(e))
+
+                if (i + 1) % 10 == 0 or (i + 1) == total:
+                    logger.info(
+                        "batch progress",
+                        processed=i + 1,
+                        total=total,
+                        percent=round((i + 1) / total * 100, 1),
+                    )
+        else:
+            # Parallel processing with ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all tasks and track by index
+                future_to_index = {
+                    executor.submit(self._ingest_worker, fp, metadata): i
+                    for i, fp in enumerate(file_paths)
+                }
+
+                completed = 0
+                for future in as_completed(future_to_index):
+                    idx = future_to_index[future]
+                    file_path = file_paths[idx]
+                    try:
+                        result = future.result()
+                        results_dict[idx] = result
+                    except Exception as e:
+                        logger.error(
+                            "failed to ingest document",
+                            file_path=str(file_path),
+                            error=str(e),
+                        )
+                        results_dict[idx] = IngestResult(error=str(e))
+
+                    completed += 1
+                    if completed % 10 == 0 or completed == total:
+                        logger.info(
+                            "batch progress",
+                            processed=completed,
+                            total=total,
+                            percent=round(completed / total * 100, 1),
+                        )
+
+        # Convert dict to ordered list
+        results = [results_dict[i] for i in range(total)]
 
         duration_ms = (time.perf_counter() - start) * 1000
         successful = sum(1 for r in results if r.document and not r.was_duplicate)

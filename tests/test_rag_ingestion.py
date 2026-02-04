@@ -9,10 +9,12 @@ import pytest
 from psycopg2.extras import RealDictCursor
 
 from pdf_llm_server.rag import (
+    PathValidationError,
     PgVectorStore,
     RAGIngestionPipeline,
     compute_file_hash,
     ingest_document,
+    validate_file_path,
 )
 
 MIGRATIONS_DIR = Path(__file__).parent.parent / "migrations"
@@ -91,6 +93,67 @@ def another_pdf_path(tmp_path_factory) -> Path:
     doc.close()
 
     return pdf_path
+
+
+class TestValidateFilePath:
+    """Tests for validate_file_path function."""
+
+    def test_validates_existing_file(self, sample_pdf_path):
+        """Test that existing file passes validation."""
+        result = validate_file_path(sample_pdf_path)
+        assert result == sample_pdf_path.resolve()
+
+    def test_validates_within_allowed_dir(self, sample_pdf_path):
+        """Test file within allowed directory passes."""
+        allowed_dir = sample_pdf_path.parent
+        result = validate_file_path(sample_pdf_path, allowed_dirs=[allowed_dir])
+        assert result == sample_pdf_path.resolve()
+
+    def test_rejects_outside_allowed_dir(self, sample_pdf_path, tmp_path):
+        """Test file outside allowed directory is rejected."""
+        # Create a different allowed directory
+        other_dir = tmp_path / "other"
+        other_dir.mkdir()
+
+        with pytest.raises(PathValidationError):
+            validate_file_path(sample_pdf_path, allowed_dirs=[other_dir])
+
+    def test_rejects_nonexistent_file(self, tmp_path):
+        """Test nonexistent file raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            validate_file_path(tmp_path / "nonexistent.pdf")
+
+    def test_multiple_allowed_dirs(self, sample_pdf_path, tmp_path):
+        """Test file in one of multiple allowed directories passes."""
+        other_dir = tmp_path / "other"
+        other_dir.mkdir()
+
+        # File is in sample_pdf_path.parent, not other_dir
+        result = validate_file_path(
+            sample_pdf_path, allowed_dirs=[other_dir, sample_pdf_path.parent]
+        )
+        assert result == sample_pdf_path.resolve()
+
+
+class TestIngestDocumentPathValidation:
+    """Tests for path validation in ingest_document."""
+
+    def test_rejects_path_outside_allowed_dirs(self, db, sample_pdf_path, tmp_path):
+        """Test that ingestion rejects paths outside allowed directories."""
+        other_dir = tmp_path / "allowed"
+        other_dir.mkdir()
+
+        with pytest.raises(PathValidationError):
+            ingest_document(
+                sample_pdf_path, db, allowed_dirs=[other_dir]
+            )
+
+    def test_accepts_path_within_allowed_dirs(self, db, sample_pdf_path):
+        """Test that ingestion accepts paths within allowed directories."""
+        result = ingest_document(
+            sample_pdf_path, db, allowed_dirs=[sample_pdf_path.parent]
+        )
+        assert result.document is not None
 
 
 class TestComputeFileHash:
@@ -229,6 +292,75 @@ class TestRAGIngestionPipeline:
         assert len(results) == 2
         assert results[0].document is not None  # valid file succeeded
         assert results[1].error is not None  # missing file failed
+
+    def test_pipeline_with_allowed_dirs(self, db, sample_pdf_path):
+        """Test pipeline with allowed_dirs parameter."""
+        pipeline = RAGIngestionPipeline(
+            db, allowed_dirs=[sample_pdf_path.parent]
+        )
+        result = pipeline.ingest(sample_pdf_path)
+        assert result.document is not None
+
+    def test_pipeline_rejects_outside_allowed_dirs(self, db, sample_pdf_path, tmp_path):
+        """Test pipeline rejects files outside allowed directories."""
+        other_dir = tmp_path / "allowed"
+        other_dir.mkdir()
+
+        pipeline = RAGIngestionPipeline(db, allowed_dirs=[other_dir])
+
+        with pytest.raises(PathValidationError):
+            pipeline.ingest(sample_pdf_path)
+
+
+class TestParallelBatchProcessing:
+    """Tests for parallel batch processing."""
+
+    def test_parallel_batch_ingest(self, db, sample_pdf_path, another_pdf_path):
+        """Test parallel batch ingestion with max_workers > 1."""
+        pipeline = RAGIngestionPipeline(db)
+        results = pipeline.ingest_batch(
+            [sample_pdf_path, another_pdf_path], max_workers=2
+        )
+
+        assert len(results) == 2
+        assert all(r.document is not None for r in results)
+        assert all(r.chunks_count > 0 for r in results)
+
+    def test_sequential_batch_ingest(self, db, sample_pdf_path, another_pdf_path):
+        """Test sequential batch ingestion with max_workers=1."""
+        pipeline = RAGIngestionPipeline(db)
+        results = pipeline.ingest_batch(
+            [sample_pdf_path, another_pdf_path], max_workers=1
+        )
+
+        assert len(results) == 2
+        assert all(r.document is not None for r in results)
+
+    def test_parallel_batch_preserves_order(self, db, sample_pdf_path, another_pdf_path):
+        """Test that parallel batch results match input order."""
+        pipeline = RAGIngestionPipeline(db)
+        results = pipeline.ingest_batch(
+            [sample_pdf_path, another_pdf_path], max_workers=4
+        )
+
+        # Results should be in same order as input
+        assert len(results) == 2
+        # Verify by checking file paths in stored documents
+        assert sample_pdf_path.name in results[0].document.file_path
+        assert another_pdf_path.name in results[1].document.file_path
+
+    def test_parallel_batch_handles_errors(self, db, sample_pdf_path, tmp_path):
+        """Test parallel batch handles errors gracefully."""
+        pipeline = RAGIngestionPipeline(db)
+        nonexistent = tmp_path / "missing.pdf"
+
+        results = pipeline.ingest_batch(
+            [sample_pdf_path, nonexistent], max_workers=2
+        )
+
+        assert len(results) == 2
+        assert results[0].document is not None
+        assert results[1].error is not None
 
 
 class TestEndToEndIntegration:

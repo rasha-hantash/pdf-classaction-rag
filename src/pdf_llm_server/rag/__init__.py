@@ -13,7 +13,9 @@ from .ingestion import (
     RAGIngestionPipeline,
     ingest_document,
     compute_file_hash,
+    validate_file_path,
     IngestResult,
+    PathValidationError,
 )
 
 __all__ = [
@@ -42,5 +44,7 @@ __all__ = [
     "RAGIngestionPipeline",
     "ingest_document",
     "compute_file_hash",
+    "validate_file_path",
     "IngestResult",
+    "PathValidationError",
 ]

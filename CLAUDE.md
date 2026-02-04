@@ -145,6 +145,54 @@ This allows callers to:
 2. Retry only failed items
 3. Generate accurate success/failure reports
 
+### Sequential vs Parallel Batch Processing
+
+For I/O-bound operations like PDF ingestion, parallel processing can improve throughput. Here's the pattern:
+
+**Sequential (simpler, use for debugging or when order matters):**
+
+```python
+def ingest_batch(self, file_paths: list[Path]) -> list[IngestResult]:
+    results = []
+    for file_path in file_paths:
+        try:
+            result = self.ingest(file_path)
+            results.append(result)
+        except Exception as e:
+            results.append(IngestResult(error=str(e)))
+    return results
+```
+
+**Parallel (with ThreadPoolExecutor for I/O-bound tasks):**
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def ingest_batch(self, file_paths: list[Path], max_workers: int = 4) -> list[IngestResult]:
+    results_dict: dict[int, IngestResult] = {}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {
+            executor.submit(self._ingest_worker, fp): i
+            for i, fp in enumerate(file_paths)
+        }
+
+        for future in as_completed(future_to_index):
+            idx = future_to_index[future]
+            try:
+                results_dict[idx] = future.result()
+            except Exception as e:
+                results_dict[idx] = IngestResult(error=str(e))
+
+    # Preserve input order
+    return [results_dict[i] for i in range(len(file_paths))]
+```
+
+**Important:** When using parallel processing with database connections:
+- psycopg2 connections are NOT thread-safe
+- Each worker thread must create its own connection
+- Store the connection string (not the connection) in the class
+
 ## Testing Patterns
 
 ### 1. Use explicit table truncation for test isolation
