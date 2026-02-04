@@ -3,7 +3,6 @@
 import shutil
 import tempfile
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -49,24 +48,6 @@ class IngestResponse(BaseModel):
     file_path: str
     chunks_count: int = 0
     was_duplicate: bool = False
-
-
-class DocumentResponse(BaseModel):
-    id: UUID
-    file_hash: str
-    file_path: str
-    metadata: dict
-    created_at: datetime
-
-
-class DocumentListResponse(BaseModel):
-    documents: list[DocumentResponse]
-    count: int
-
-
-class DeleteResponse(BaseModel):
-    deleted: bool
-    document_id: UUID
 
 
 class HealthResponse(BaseModel):
@@ -188,7 +169,7 @@ def ingest_file(file: UploadFile = File(...)):
             detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)}MB",
         )
 
-    # Save to temp file
+    # Save to temp file (ingest_document expects a file path, not a stream)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp_path = Path(tmp.name)
         shutil.copyfileobj(file.file, tmp)
@@ -238,29 +219,3 @@ def query(request: QueryRequest):
     )
 
 
-@app.get("/api/v1/rag/documents", response_model=DocumentListResponse)
-def list_documents():
-    """List all ingested documents."""
-    docs = db.get_documents()
-    return DocumentListResponse(
-        documents=[
-            DocumentResponse(
-                id=d.id,
-                file_hash=d.file_hash,
-                file_path=d.file_path,
-                metadata=d.metadata,
-                created_at=d.created_at,
-            )
-            for d in docs
-        ],
-        count=len(docs),
-    )
-
-
-@app.delete("/api/v1/rag/documents/{document_id}", response_model=DeleteResponse)
-def delete_document(document_id: UUID):
-    """Delete a document and its chunks."""
-    deleted = db.delete_document(document_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
-    return DeleteResponse(deleted=True, document_id=document_id)

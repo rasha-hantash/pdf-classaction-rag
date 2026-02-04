@@ -49,8 +49,6 @@ The server runs at http://localhost:8000. API docs available at http://localhost
 | GET | `/ready` | Readiness check (DB connectivity) |
 | POST | `/api/v1/rag/ingest` | Upload and ingest a PDF file |
 | POST | `/api/v1/rag/query` | Ask a question using RAG |
-| GET | `/api/v1/rag/documents` | List all ingested documents |
-| DELETE | `/api/v1/rag/documents/{id}` | Delete a document |
 
 ## Usage Examples
 
@@ -92,18 +90,6 @@ Response:
   ],
   "chunks_used": 5
 }
-```
-
-### List documents
-
-```bash
-curl http://localhost:8000/api/v1/rag/documents
-```
-
-### Delete a document
-
-```bash
-curl -X DELETE http://localhost:8000/api/v1/rag/documents/{document_id}
 ```
 
 ## Running Tests
