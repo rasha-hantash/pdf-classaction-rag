@@ -5,10 +5,18 @@
 Always use [golang-migrate/migrate](https://github.com/golang-migrate/migrate) to create new migrations:
 
 ```bash
-migrate create -ext sql -dir migrations -seq <migration_name>
+migrate create -ext sql -dir backend/migrations -seq <migration_name>
 ```
 
 This creates properly formatted migration files with sequential numbering.
+
+## Repository Structure
+
+This is a monorepo with the following layout:
+
+- `backend/` — Python FastAPI server, migrations, tests, scripts
+- `frontend/` — React/TanStack Router app (TypeScript, TailwindCSS)
+- Root — Infrastructure and config files (docker-compose.yaml, Taskfile.yml, CLAUDE.md, etc.)
 
 ## Database Patterns (psycopg2)
 
@@ -87,6 +95,36 @@ return result
 ```
 
 This prevents file handle leaks which can cause "too many open files" errors in long-running processes.
+
+## File Upload Handling
+
+### 1. Always validate file size on disk after saving
+
+`UploadFile.size` can be `None` with chunked uploads, so always check the actual file size on disk after writing to a temp file:
+
+```python
+# BAD - file.size can be None, bypassing the check
+if file.size and file.size > MAX_UPLOAD_SIZE:
+    raise HTTPException(status_code=413, detail="File too large")
+
+# GOOD - check actual size on disk after saving
+shutil.copyfileobj(file.file, tmp)
+actual_size = tmp_path.stat().st_size
+if actual_size > MAX_UPLOAD_SIZE:
+    raise HTTPException(status_code=413, detail="File too large")
+```
+
+### 2. Always preserve and store the original filename
+
+When processing uploads through temp files, never store the temp path in the database. Pass the original filename through the processing pipeline:
+
+```python
+# BAD - stores "/var/folders/.../tmp7l6xen1j.pdf" in the database
+db.insert_document(file_path=str(tmp_path), ...)
+
+# GOOD - stores the user's original filename
+db.insert_document(file_path=original_filename or str(tmp_path), ...)
+```
 
 ## Multi-Table Operations
 
@@ -271,3 +309,25 @@ clear_context()
 2. **Include identifiers** like `document_id`, `chunk_id` for traceability
 3. **Log at appropriate levels**: `info` for normal operations, `error` for failures, `debug` for verbose output
 4. **Use structured fields** instead of string interpolation for queryable logs
+
+## Frontend Code Organization
+
+### Directory structure
+
+```
+frontend/src/
+├── components/       # React components with barrel export (index.ts)
+├── hooks/            # Custom hooks with barrel export (index.ts)
+├── lib/              # Types and API client (NO barrel export)
+│   ├── types.ts      # All shared TypeScript interfaces
+│   └── api.ts        # Typed fetch wrappers for backend API
+├── routes/           # TanStack Router file-based routes
+└── styles/           # Global styles (TailwindCSS)
+```
+
+### Conventions
+
+- Create barrel exports (`index.ts`) for `components/` and `hooks/` directories
+- Keep all shared types in `lib/types.ts` — do NOT create a separate `types/` directory
+- Do NOT create barrel exports for `lib/`
+- API wrappers go in `lib/api.ts`

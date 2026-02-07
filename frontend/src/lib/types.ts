@@ -6,8 +6,8 @@ export interface IngestResponse {
 }
 
 export interface SourceResponse {
-  chunk_id: string
-  document_id: string
+  chunk_id: string | null
+  document_id: string | null
   file_path: string
   page_number: number | null
   content: string
