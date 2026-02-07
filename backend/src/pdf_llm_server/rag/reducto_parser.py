@@ -173,7 +173,7 @@ def parse_pdf_reducto(file_path: str | Path) -> ParsedDocument:
         page_data = pages_dict[page_num]
         pages.append(
             ParsedPage(
-                page_number=page_num + 1,
+                page_number=page_num,  # Reducto bbox.page is already 1-indexed
                 blocks=page_data["blocks"],
                 tables=page_data["tables"],
             )
