@@ -19,7 +19,6 @@ from .rag import (
     PgVectorStore,
     RAGIngestionPipeline,
     RAGRetriever,
-    ingest_document,
 )
 
 # Maximum file size for uploads (50MB)
@@ -54,13 +53,6 @@ class QueryResponse(BaseModel):
     answer: str
     sources: list[SourceResponse]
     chunks_used: int
-
-
-class IngestResponse(BaseModel):
-    document_id: UUID | None = None
-    file_path: str
-    chunks_count: int = 0
-    was_duplicate: bool = False
 
 
 class BatchIngestItemResponse(BaseModel):
@@ -184,65 +176,6 @@ def ready():
 
 
 # --- RAG Endpoints ---
-
-
-@app.post("/api/v1/rag/ingest", response_model=IngestResponse)
-def ingest_file(file: UploadFile = File(...)):
-    """Ingest a PDF file via upload."""
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
-
-    # Check file size
-    if file.size and file.size > MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)}MB",
-        )
-
-    # Save to temp file (ingest_document expects a file path, not a stream)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        tmp_path = Path(tmp.name)
-        shutil.copyfileobj(file.file, tmp)
-
-    try:
-        # Check actual file size on disk (file.size can be None with chunked uploads)
-        actual_size = tmp_path.stat().st_size
-        if actual_size > MAX_UPLOAD_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)}MB",
-            )
-        # Validate PDF magic bytes
-        with open(tmp_path, "rb") as f:
-            header = f.read(5)
-        if header != b"%PDF-":
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid PDF file. File does not have valid PDF header.",
-            )
-
-        result = ingest_document(
-            file_path=tmp_path,
-            db=db,
-            embedding_client=get_embedding_client(),
-            original_filename=file.filename,
-        )
-        if result.error:
-            raise HTTPException(status_code=500, detail=result.error)
-
-        # Persist the PDF for later viewing
-        if result.document and not result.was_duplicate:
-            pdf_dest = PDF_STORAGE_DIR / f"{result.document.id}.pdf"
-            shutil.copy2(tmp_path, pdf_dest)
-
-        return IngestResponse(
-            document_id=result.document.id if result.document else None,
-            file_path=file.filename,
-            chunks_count=result.chunks_count,
-            was_duplicate=result.was_duplicate,
-        )
-    finally:
-        tmp_path.unlink(missing_ok=True)
 
 
 @app.post("/api/v1/rag/ingest/batch", response_model=BatchIngestResponse)
