@@ -42,12 +42,12 @@ export function QueryInput({
   }, [value])
 
   return (
-    <div className="border-t border-gray-200 bg-white p-4">
+    <div className="border-t border-border-warm bg-warm-white p-4">
       <div
         className={`flex items-end gap-2 rounded-xl border px-3 py-2 transition-colors ${
           isDisabled
-            ? 'border-gray-200 bg-gray-50'
-            : 'border-gray-300 bg-white focus-within:border-gray-400'
+            ? 'border-border-warm bg-cream'
+            : 'border-border-warm bg-warm-white focus-within:border-terracotta'
         }`}
       >
         <textarea
@@ -62,12 +62,12 @@ export function QueryInput({
               : 'Upload a document first...'
           }
           rows={1}
-          className="flex-1 resize-none bg-transparent text-sm text-gray-800 placeholder-gray-400 outline-none disabled:text-gray-400 disabled:cursor-not-allowed"
+          className="flex-1 resize-none bg-transparent text-sm text-text-primary placeholder-stone-400 outline-none disabled:text-stone-400 disabled:cursor-not-allowed"
         />
         <button
           onClick={handleSubmit}
           disabled={isDisabled || !value.trim()}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-900 text-white transition-colors hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-terracotta text-white transition-colors hover:bg-terracotta-hover disabled:bg-stone-300 disabled:cursor-not-allowed"
         >
           {isQuerying ? (
             <svg

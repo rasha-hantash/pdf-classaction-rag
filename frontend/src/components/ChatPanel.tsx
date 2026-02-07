@@ -46,7 +46,7 @@ export function ChatPanel({
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && docs.length > 0 && (
-          <div className="flex items-center justify-center h-full text-sm text-gray-400">
+          <div className="flex items-center justify-center h-full text-sm text-stone-400">
             Ask a question about your documents
           </div>
         )}
@@ -57,8 +57,8 @@ export function ChatPanel({
 
         {isQuerying && (
           <div className="flex justify-start">
-            <div className="rounded-2xl bg-white border border-gray-200 px-4 py-3">
-              <div className="flex items-center gap-2 text-sm text-gray-400">
+            <div className="rounded-2xl bg-warm-white border border-border-warm px-4 py-3">
+              <div className="flex items-center gap-2 text-sm text-stone-400">
                 <svg
                   className="h-4 w-4 animate-spin"
                   fill="none"
