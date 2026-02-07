@@ -1,6 +1,7 @@
 """Document ingestion pipeline for the RAG system."""
 
 import hashlib
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -137,8 +138,12 @@ def ingest_document(
         )
         return IngestResult(document=existing, chunks_count=0, was_duplicate=True)
 
-    # Step 3: Assess OCR needs
-    needs_ocr = assess_needs_ocr(file_path)
+    # Step 3: Assess OCR needs (skip for Reducto - it handles OCR internally)
+    parser = os.getenv("PDF_PARSER", "pymupdf").lower()
+    if parser == "reducto":
+        needs_ocr = False
+    else:
+        needs_ocr = assess_needs_ocr(file_path)
     if needs_ocr:
         logger.warn(
             "document may need ocr",
