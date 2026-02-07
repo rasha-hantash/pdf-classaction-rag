@@ -314,6 +314,11 @@ class RAGIngestionPipeline:
         Returns:
             List of IngestResult objects in the same order as input file_paths.
         """
+        if original_filenames and len(original_filenames) != len(file_paths):
+            raise ValueError(
+                f"original_filenames length ({len(original_filenames)}) must match file_paths length ({len(file_paths)})"
+            )
+
         total = len(file_paths)
         if total == 0:
             return []

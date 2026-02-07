@@ -25,6 +25,9 @@ from .rag import (
 # Maximum file size for uploads (50MB)
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024
 
+# Maximum number of files in a single batch upload
+MAX_BATCH_SIZE = 100
+
 # Directory for persistent PDF storage
 PDF_STORAGE_DIR = Path(os.getenv("PDF_STORAGE_DIR", "./data/pdfs"))
 
@@ -245,6 +248,12 @@ def ingest_file(file: UploadFile = File(...)):
 @app.post("/api/v1/rag/ingest/batch", response_model=BatchIngestResponse)
 def ingest_batch(files: list[UploadFile] = File(...)):
     """Ingest multiple PDF files via batch upload."""
+    if len(files) > MAX_BATCH_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many files. Maximum batch size is {MAX_BATCH_SIZE}",
+        )
+
     results: list[BatchIngestItemResponse] = []
     valid_tmp_paths: list[Path] = []
     valid_filenames: list[str] = []

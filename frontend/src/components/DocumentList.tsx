@@ -75,7 +75,7 @@ export function DocumentList({
           <p className="text-sm text-stone-500 mb-2">
             Upload PDF documents to get started
           </p>
-          <div className="flex gap-2">
+          <div className="flex gap-2 justify-center">
             <button
               onClick={handleClick}
               className="inline-flex items-center gap-1.5 rounded-lg bg-terracotta px-3.5 py-2 text-sm font-medium text-white hover:bg-terracotta-hover transition-colors"
