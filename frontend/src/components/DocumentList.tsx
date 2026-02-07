@@ -32,7 +32,7 @@ export function DocumentList({
   }
 
   return (
-    <div className="border-b border-gray-200 bg-white px-4 py-3">
+    <div className="border-b border-border-warm bg-warm-white px-4 py-3">
       <input
         ref={fileInputRef}
         type="file"
@@ -44,12 +44,12 @@ export function DocumentList({
 
       {docs.length === 0 && !isUploading ? (
         <div className="text-center py-4">
-          <p className="text-sm text-gray-500 mb-2">
+          <p className="text-sm text-stone-500 mb-2">
             Upload PDF documents to get started
           </p>
           <button
             onClick={handleClick}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-gray-800 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-terracotta px-3.5 py-2 text-sm font-medium text-white hover:bg-terracotta-hover transition-colors"
           >
             <svg
               className="h-4 w-4"
@@ -72,10 +72,10 @@ export function DocumentList({
           {docs.map((doc) => (
             <span
               key={doc.id}
-              className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700"
+              className="inline-flex items-center gap-1 rounded-full bg-cream-dark px-2.5 py-1 text-xs text-stone-700"
             >
               <svg
-                className="h-3 w-3 text-gray-400"
+                className="h-3 w-3 text-stone-400"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -88,12 +88,12 @@ export function DocumentList({
                 />
               </svg>
               {doc.name}
-              <span className="text-gray-400">({doc.chunks} chunks)</span>
+              <span className="text-stone-400">({doc.chunks} chunks)</span>
             </span>
           ))}
 
           {isUploading && uploadingFileName && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs text-blue-600">
+            <span className="inline-flex items-center gap-1 rounded-full bg-terracotta-light px-2.5 py-1 text-xs text-terracotta">
               <svg
                 className="h-3 w-3 animate-spin"
                 fill="none"
@@ -120,7 +120,7 @@ export function DocumentList({
           <button
             onClick={handleClick}
             disabled={isUploading}
-            className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 px-2.5 py-1 text-xs text-gray-500 hover:border-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-border-warm px-2.5 py-1 text-xs text-stone-500 hover:border-border-warm-hover hover:text-stone-600 transition-colors disabled:opacity-50"
           >
             <svg
               className="h-3 w-3"
