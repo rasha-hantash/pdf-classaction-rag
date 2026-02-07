@@ -1,4 +1,4 @@
-import type { IngestResponse, QueryResponse, DocumentResponse } from './types'
+import type { IngestResponse, BatchIngestResponse, QueryResponse, DocumentResponse } from './types'
 
 export async function ingestFile(file: File): Promise<IngestResponse> {
   const formData = new FormData()
@@ -12,6 +12,25 @@ export async function ingestFile(file: File): Promise<IngestResponse> {
   if (!res.ok) {
     const body = await res.json().catch(() => null)
     throw new Error(body?.detail ?? `Upload failed (${res.status})`)
+  }
+
+  return res.json()
+}
+
+export async function ingestBatch(files: File[]): Promise<BatchIngestResponse> {
+  const formData = new FormData()
+  for (const file of files) {
+    formData.append('files', file)
+  }
+
+  const res = await fetch('/api/v1/rag/ingest/batch', {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null)
+    throw new Error(body?.detail ?? `Batch upload failed (${res.status})`)
   }
 
   return res.json()

@@ -247,12 +247,14 @@ class RAGIngestionPipeline:
         self,
         file_path: str | Path,
         metadata: dict | None = None,
+        original_filename: str | None = None,
     ) -> IngestResult:
         """Ingest a single document.
 
         Args:
             file_path: Path to the PDF file.
             metadata: Optional metadata to attach.
+            original_filename: Optional original filename to store in the database.
 
         Returns:
             IngestResult with document info and chunk count.
@@ -264,12 +266,14 @@ class RAGIngestionPipeline:
             metadata=metadata,
             chunking_strategy=self.chunking_strategy,
             allowed_dirs=self.allowed_dirs,
+            original_filename=original_filename,
         )
 
     def _ingest_worker(
         self,
         file_path: str | Path,
         metadata: dict | None,
+        original_filename: str | None = None,
     ) -> IngestResult:
         """Worker function for parallel ingestion with its own DB connection.
 
@@ -286,6 +290,7 @@ class RAGIngestionPipeline:
                 metadata=metadata,
                 chunking_strategy=self.chunking_strategy,
                 allowed_dirs=self.allowed_dirs,
+                original_filename=original_filename,
             )
         finally:
             worker_db.disconnect()
@@ -295,6 +300,7 @@ class RAGIngestionPipeline:
         file_paths: list[str | Path],
         metadata: dict | None = None,
         max_workers: int = 4,
+        original_filenames: list[str] | None = None,
     ) -> list[IngestResult]:
         """Ingest multiple documents in parallel.
 
@@ -303,6 +309,7 @@ class RAGIngestionPipeline:
             metadata: Optional metadata to attach to all documents.
             max_workers: Maximum number of parallel workers (default: 4).
                 Set to 1 for sequential processing.
+            original_filenames: Optional list of original filenames, one per file_path.
 
         Returns:
             List of IngestResult objects in the same order as input file_paths.
@@ -325,7 +332,8 @@ class RAGIngestionPipeline:
             # Sequential processing (original behavior)
             for i, file_path in enumerate(file_paths):
                 try:
-                    result = self.ingest(file_path, metadata)
+                    fname = original_filenames[i] if original_filenames else None
+                    result = self.ingest(file_path, metadata, original_filename=fname)
                     results_dict[i] = result
                 except Exception as e:
                     logger.error(
@@ -347,7 +355,12 @@ class RAGIngestionPipeline:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Submit all tasks and track by index
                 future_to_index = {
-                    executor.submit(self._ingest_worker, fp, metadata): i
+                    executor.submit(
+                        self._ingest_worker,
+                        fp,
+                        metadata,
+                        original_filenames[i] if original_filenames else None,
+                    ): i
                     for i, fp in enumerate(file_paths)
                 }
 
