@@ -2,6 +2,7 @@
 
 import os
 import time
+from uuid import UUID
 
 from anthropic import Anthropic
 from pydantic import BaseModel
@@ -15,9 +16,13 @@ from .models import SearchResult
 class SourceReference(BaseModel):
     """A source reference from a retrieved chunk."""
 
+    chunk_id: UUID | None = None
+    document_id: UUID | None = None
     file_path: str
     page_number: int | None
+    content: str
     content_preview: str  # First 200 chars of chunk
+    bbox: list[float] | None = None  # [x0, y0, x1, y1] coordinates
 
 
 class RAGResponse(BaseModel):
@@ -146,9 +151,13 @@ Rules:
 
             sources.append(
                 SourceReference(
+                    chunk_id=chunk.id,
+                    document_id=doc.id if doc else None,
                     file_path=doc.file_path if doc else "unknown",
                     page_number=chunk.page_number,
+                    content=chunk.content,
                     content_preview=chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content,
+                    bbox=chunk.bbox,
                 )
             )
 
