@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { ingestFile, ingestBatch } from '../lib/api'
+import { ingestBatch } from '../lib/api'
 import type { UploadedDoc } from '../lib/types'
 
 interface UseIngestReturn {
@@ -40,9 +40,12 @@ export function useIngest(
         validFiles.push(file)
       }
 
-      if (validFiles.length > 1) {
-        // Batch upload
-        setUploadingFileName(`Uploading ${validFiles.length} files...`)
+      if (validFiles.length >= 1) {
+        setUploadingFileName(
+          validFiles.length === 1
+            ? validFiles[0].name
+            : `Uploading ${validFiles.length} files...`,
+        )
         try {
           const batchResult = await ingestBatch(validFiles)
           for (const item of batchResult.results) {
@@ -59,25 +62,7 @@ export function useIngest(
             }
           }
         } catch (e) {
-          errors.push(e instanceof Error ? e.message : 'Batch upload failed')
-        }
-      } else if (validFiles.length === 1) {
-        // Single file upload
-        const file = validFiles[0]
-        setUploadingFileName(file.name)
-        try {
-          const result = await ingestFile(file)
-          if (result.was_duplicate) {
-            errors.push(`${file.name} was already uploaded`)
-          } else if (result.document_id) {
-            onDocUploaded({
-              id: result.document_id,
-              name: file.name,
-              chunks: result.chunks_count,
-            })
-          }
-        } catch (e) {
-          errors.push(e instanceof Error ? e.message : `${file.name} upload failed`)
+          errors.push(e instanceof Error ? e.message : 'Upload failed')
         }
       }
 
