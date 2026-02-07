@@ -189,7 +189,7 @@ def parse_pdf(file_path: str | Path) -> ParsedDocument:
                     file_path=str(file_path),
                     page_number=page_num + 1,
                 )
-                ocr_text = _ocr_page(page)
+                ocr_text = ocr_page(page)
                 ocr_pages_count += 1
                 if ocr_text.strip():
                     # Create a single block from OCR text

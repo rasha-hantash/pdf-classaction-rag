@@ -1,5 +1,6 @@
 """FastAPI REST API for the RAG pipeline."""
 
+import os
 import shutil
 import tempfile
 from contextlib import asynccontextmanager
@@ -7,7 +8,8 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel, Field
 
 from .logger import logger
@@ -22,6 +24,9 @@ from .rag import (
 # Maximum file size for uploads (50MB)
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024
 
+# Directory for persistent PDF storage
+PDF_STORAGE_DIR = Path(os.getenv("PDF_STORAGE_DIR", "./data/pdfs"))
+
 
 # --- Request/Response Models ---
 
@@ -32,9 +37,13 @@ class QueryRequest(BaseModel):
 
 
 class SourceResponse(BaseModel):
+    chunk_id: UUID | None = None
+    document_id: UUID | None = None
     file_path: str
     page_number: int | None
+    content: str
     content_preview: str
+    bbox: list[float] | None = None
 
 
 class QueryResponse(BaseModel):
@@ -89,6 +98,8 @@ async def lifespan(app: FastAPI):
     global db
 
     logger.info("starting server")
+
+    PDF_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
     db = PgVectorStore()
     db.connect()
@@ -175,6 +186,13 @@ def ingest_file(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, tmp)
 
     try:
+        # Check actual file size on disk (file.size can be None with chunked uploads)
+        actual_size = tmp_path.stat().st_size
+        if actual_size > MAX_UPLOAD_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)}MB",
+            )
         # Validate PDF magic bytes
         with open(tmp_path, "rb") as f:
             header = f.read(5)
@@ -188,9 +206,16 @@ def ingest_file(file: UploadFile = File(...)):
             file_path=tmp_path,
             db=db,
             embedding_client=get_embedding_client(),
+            original_filename=file.filename,
         )
         if result.error:
             raise HTTPException(status_code=500, detail=result.error)
+
+        # Persist the PDF for later viewing
+        if result.document and not result.was_duplicate:
+            pdf_dest = PDF_STORAGE_DIR / f"{result.document.id}.pdf"
+            shutil.copy2(tmp_path, pdf_dest)
+
         return IngestResponse(
             document_id=result.document.id if result.document else None,
             file_path=file.filename,
@@ -209,9 +234,13 @@ def query(request: QueryRequest):
         answer=response.answer,
         sources=[
             SourceResponse(
+                chunk_id=s.chunk_id,
+                document_id=s.document_id,
                 file_path=s.file_path,
                 page_number=s.page_number,
+                content=s.content,
                 content_preview=s.content_preview,
+                bbox=s.bbox,
             )
             for s in response.sources
         ],
@@ -219,3 +248,49 @@ def query(request: QueryRequest):
     )
 
 
+# --- Document Endpoints ---
+
+
+class DocumentResponse(BaseModel):
+    id: UUID
+    file_path: str
+    chunks_count: int
+    created_at: str
+
+
+@app.get("/api/v1/documents", response_model=list[DocumentResponse])
+def list_documents():
+    """List all ingested documents with chunk counts."""
+    with db.conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """SELECT d.id, d.file_path, d.created_at,
+                      COUNT(c.id) AS chunks_count
+               FROM documents d
+               LEFT JOIN chunks c ON c.document_id = d.id
+               GROUP BY d.id
+               ORDER BY d.created_at DESC"""
+        )
+        rows = cur.fetchall()
+
+    return [
+        DocumentResponse(
+            id=row["id"],
+            file_path=row["file_path"],
+            chunks_count=row["chunks_count"],
+            created_at=row["created_at"].isoformat(),
+        )
+        for row in rows
+    ]
+
+
+@app.get("/api/v1/documents/{document_id}/file")
+def get_document_file(document_id: UUID):
+    """Serve the original PDF file for a document."""
+    pdf_path = PDF_STORAGE_DIR / f"{document_id}.pdf"
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="PDF file not found")
+    return FileResponse(
+        path=pdf_path,
+        media_type="application/pdf",
+        filename=f"{document_id}.pdf",
+    )

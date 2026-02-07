@@ -93,6 +93,7 @@ def ingest_document(
     metadata: dict | None = None,
     chunking_strategy: str = "semantic",
     allowed_dirs: list[Path] | None = None,
+    original_filename: str | None = None,
 ) -> IngestResult:
     """Ingest a single PDF document into the RAG system.
 
@@ -105,6 +106,8 @@ def ingest_document(
         chunking_strategy: "semantic" or "fixed" chunking strategy.
         allowed_dirs: Optional list of allowed directories for path validation.
             If provided, file_path must be within one of these directories.
+        original_filename: Optional original filename to store in the database.
+            If None, the file_path basename is used.
 
     Returns:
         IngestResult with document info and chunk count.
@@ -189,9 +192,10 @@ def ingest_document(
         )
 
     # Step 7: Insert document and chunks atomically in a single transaction
+    stored_path = original_filename if original_filename else str(file_path)
     document, chunk_records = db.insert_document_with_chunks(
         file_hash=file_hash,
-        file_path=str(file_path),
+        file_path=stored_path,
         chunks=chunk_data_list,
         metadata=metadata or {},
     )
