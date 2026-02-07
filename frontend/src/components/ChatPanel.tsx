@@ -57,7 +57,7 @@ export function ChatPanel({
 
         {isQuerying && (
           <div className="flex justify-start">
-            <div className="rounded-2xl px-4 py-3">
+            <div className="rounded-2xl bg-warm-white border border-border-warm px-4 py-3">
               <div className="flex items-center gap-2 text-sm text-stone-400">
                 <svg
                   className="h-4 w-4 animate-spin"
