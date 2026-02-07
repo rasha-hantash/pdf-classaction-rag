@@ -17,12 +17,16 @@ from .rag import (
     EmbeddingClient,
     PathValidationError,
     PgVectorStore,
+    RAGIngestionPipeline,
     RAGRetriever,
     ingest_document,
 )
 
 # Maximum file size for uploads (50MB)
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024
+
+# Maximum number of files in a single batch upload
+MAX_BATCH_SIZE = 100
 
 # Directory for persistent PDF storage
 PDF_STORAGE_DIR = Path(os.getenv("PDF_STORAGE_DIR", "./data/pdfs"))
@@ -57,6 +61,21 @@ class IngestResponse(BaseModel):
     file_path: str
     chunks_count: int = 0
     was_duplicate: bool = False
+
+
+class BatchIngestItemResponse(BaseModel):
+    file_name: str
+    document_id: UUID | None = None
+    chunks_count: int = 0
+    was_duplicate: bool = False
+    error: str | None = None
+
+
+class BatchIngestResponse(BaseModel):
+    results: list[BatchIngestItemResponse]
+    successful: int = 0
+    duplicates: int = 0
+    failed: int = 0
 
 
 class HealthResponse(BaseModel):
@@ -224,6 +243,115 @@ def ingest_file(file: UploadFile = File(...)):
         )
     finally:
         tmp_path.unlink(missing_ok=True)
+
+
+@app.post("/api/v1/rag/ingest/batch", response_model=BatchIngestResponse)
+def ingest_batch(files: list[UploadFile] = File(...)):
+    """Ingest multiple PDF files via batch upload."""
+    if len(files) > MAX_BATCH_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many files. Maximum batch size is {MAX_BATCH_SIZE}",
+        )
+
+    results: list[BatchIngestItemResponse] = []
+    valid_tmp_paths: list[Path] = []
+    valid_filenames: list[str] = []
+    all_tmp_paths: list[Path] = []
+
+    # Phase 1: Validate each file and save to temp
+    for file in files:
+        file_name = file.filename or "unknown.pdf"
+
+        if not file_name.lower().endswith(".pdf"):
+            results.append(
+                BatchIngestItemResponse(
+                    file_name=file_name, error="Only PDF files are supported"
+                )
+            )
+            continue
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp_path = Path(tmp.name)
+            shutil.copyfileobj(file.file, tmp)
+        all_tmp_paths.append(tmp_path)
+
+        actual_size = tmp_path.stat().st_size
+        if actual_size > MAX_UPLOAD_SIZE:
+            results.append(
+                BatchIngestItemResponse(
+                    file_name=file_name,
+                    error=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)}MB",
+                )
+            )
+            continue
+
+        with open(tmp_path, "rb") as f:
+            header = f.read(5)
+        if header != b"%PDF-":
+            results.append(
+                BatchIngestItemResponse(
+                    file_name=file_name,
+                    error="Invalid PDF file. File does not have valid PDF header.",
+                )
+            )
+            continue
+
+        valid_tmp_paths.append(tmp_path)
+        valid_filenames.append(file_name)
+
+    # Phase 2: Batch ingest valid files
+    try:
+        if valid_tmp_paths:
+            pipeline = RAGIngestionPipeline(
+                db=db, embedding_client=get_embedding_client()
+            )
+            ingest_results = pipeline.ingest_batch(
+                file_paths=valid_tmp_paths,
+                original_filenames=valid_filenames,
+            )
+
+            for i, result in enumerate(ingest_results):
+                file_name = valid_filenames[i]
+                if result.error:
+                    results.append(
+                        BatchIngestItemResponse(
+                            file_name=file_name, error=result.error
+                        )
+                    )
+                else:
+                    if result.document and not result.was_duplicate:
+                        pdf_dest = PDF_STORAGE_DIR / f"{result.document.id}.pdf"
+                        shutil.copy2(valid_tmp_paths[i], pdf_dest)
+
+                    results.append(
+                        BatchIngestItemResponse(
+                            file_name=file_name,
+                            document_id=result.document.id
+                            if result.document
+                            else None,
+                            chunks_count=result.chunks_count,
+                            was_duplicate=result.was_duplicate,
+                        )
+                    )
+    finally:
+        for tmp_path in all_tmp_paths:
+            tmp_path.unlink(missing_ok=True)
+
+    successful = sum(
+        1
+        for r in results
+        if r.document_id and not r.was_duplicate and not r.error
+    )
+    duplicates = sum(1 for r in results if r.was_duplicate)
+    failed = sum(1 for r in results if r.error)
+
+    return BatchIngestResponse(
+        results=results,
+        successful=successful,
+        duplicates=duplicates,
+        failed=failed,
+    )
 
 
 @app.post("/api/v1/rag/query", response_model=QueryResponse)

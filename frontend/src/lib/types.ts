@@ -21,6 +21,21 @@ export interface QueryResponse {
   chunks_used: number
 }
 
+export interface BatchIngestItemResponse {
+  file_name: string
+  document_id: string | null
+  chunks_count: number
+  was_duplicate: boolean
+  error: string | null
+}
+
+export interface BatchIngestResponse {
+  results: BatchIngestItemResponse[]
+  successful: number
+  duplicates: number
+  failed: number
+}
+
 export interface DocumentResponse {
   id: string
   file_path: string
