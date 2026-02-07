@@ -310,6 +310,16 @@ clear_context()
 3. **Log at appropriate levels**: `info` for normal operations, `error` for failures, `debug` for verbose output
 4. **Use structured fields** instead of string interpolation for queryable logs
 
+## Deprecating / Removing Endpoints
+
+When removing an API endpoint, always do it in this order across separate PRs:
+
+1. **Frontend first** — Remove all client-side calls to the endpoint
+2. **Backend endpoint** — Remove the route handler
+3. **Data models** — Remove request/response models (if no longer referenced)
+
+This ensures no client is calling an endpoint before it's removed, and no models are deleted while still in use.
+
 ## Frontend Code Organization
 
 ### Directory structure

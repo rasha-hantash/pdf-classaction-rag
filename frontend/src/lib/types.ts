@@ -1,10 +1,3 @@
-export interface IngestResponse {
-  document_id: string | null
-  file_path: string
-  chunks_count: number
-  was_duplicate: boolean
-}
-
 export interface SourceResponse {
   chunk_id: string | null
   document_id: string | null

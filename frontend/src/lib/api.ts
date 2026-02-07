@@ -1,21 +1,4 @@
-import type { IngestResponse, BatchIngestResponse, QueryResponse, DocumentResponse } from './types'
-
-export async function ingestFile(file: File): Promise<IngestResponse> {
-  const formData = new FormData()
-  formData.append('file', file)
-
-  const res = await fetch('/api/v1/rag/ingest', {
-    method: 'POST',
-    body: formData,
-  })
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => null)
-    throw new Error(body?.detail ?? `Upload failed (${res.status})`)
-  }
-
-  return res.json()
-}
+import type { BatchIngestResponse, QueryResponse, DocumentResponse } from './types'
 
 export async function ingestBatch(files: File[]): Promise<BatchIngestResponse> {
   const formData = new FormData()
