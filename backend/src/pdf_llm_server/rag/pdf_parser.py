@@ -1,5 +1,6 @@
 """PDF parsing module using PyMuPDF for text and structure extraction."""
 
+import os
 import statistics
 from pathlib import Path
 
@@ -136,8 +137,8 @@ def _classify_block(
     return "paragraph"
 
 
-def parse_pdf(file_path: str | Path) -> ParsedDocument:
-    """Parse a PDF file and extract structured content.
+def parse_pdf_pymupdf(file_path: str | Path) -> ParsedDocument:
+    """Parse a PDF file using PyMuPDF and extract structured content.
 
     Args:
         file_path: Path to the PDF file.
@@ -277,3 +278,26 @@ def parse_pdf(file_path: str | Path) -> ParsedDocument:
         )
     finally:
         doc.close()
+
+
+def parse_pdf(file_path: str | Path) -> ParsedDocument:
+    """Parse a PDF file using the configured parser.
+
+    The parser is selected via the PDF_PARSER environment variable:
+    - "pymupdf" (default): Uses PyMuPDF for local parsing
+    - "reducto": Uses Reducto cloud API for parsing
+    """
+    parser = os.getenv("PDF_PARSER", "pymupdf").lower()
+
+    if parser == "reducto":
+        from .reducto_parser import parse_pdf_reducto
+
+        return parse_pdf_reducto(file_path)
+
+    if parser != "pymupdf":
+        logger.warn(
+            "unknown PDF_PARSER value, falling back to pymupdf",
+            parser=parser,
+        )
+
+    return parse_pdf_pymupdf(file_path)

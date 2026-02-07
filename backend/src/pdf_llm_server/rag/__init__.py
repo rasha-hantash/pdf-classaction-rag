@@ -1,6 +1,6 @@
 from .models import IngestedDocument, ChunkRecord, SearchResult
 from .database import PgVectorStore
-from .pdf_parser import parse_pdf, ParsedDocument, ParsedPage, TextBlock, TableData
+from .pdf_parser import parse_pdf, parse_pdf_pymupdf, ParsedDocument, ParsedPage, TextBlock, TableData
 from .chunking import (
     fixed_size_chunking,
     semantic_chunking_by_paragraphs,
@@ -38,6 +38,7 @@ __all__ = [
     "PgVectorStore",
     # PDF Parser
     "parse_pdf",
+    "parse_pdf_pymupdf",
     "ParsedDocument",
     "ParsedPage",
     "TextBlock",
