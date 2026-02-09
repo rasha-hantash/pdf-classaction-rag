@@ -1,9 +1,8 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { ChatPanel, EvidencePanel } from '../components'
-import { useIngest, useRagQuery } from '../hooks'
-import { listDocuments } from '../lib/api'
-import type { Message, UploadedDoc, SourceResponse } from '../lib/types'
+import { useDocuments, useIngest, useRagQuery } from '../hooks'
+import type { Message, SourceResponse } from '../lib/types'
 
 export const Route = createFileRoute('/')({
   component: Home,
@@ -11,31 +10,13 @@ export const Route = createFileRoute('/')({
 
 function Home() {
   const [messages, setMessages] = useState<Message[]>([])
-  const [docs, setDocs] = useState<UploadedDoc[]>([])
   const [currentSources, setCurrentSources] = useState<SourceResponse[]>([])
   const [showEvidence, setShowEvidence] = useState(false)
 
-  // Load existing documents on mount
-  useEffect(() => {
-    listDocuments().then((existing) => {
-      setDocs(
-        existing.map((d) => ({
-          id: d.id,
-          name: d.file_path.split('/').pop() || d.file_path,
-          chunks: d.chunks_count,
-        })),
-      )
-    }).catch(() => {
-      // Backend might not be running yet — ignore
-    })
-  }, [])
-
-  const handleDocUploaded = useCallback((doc: UploadedDoc) => {
-    setDocs((prev) => [...prev, doc])
-  }, [])
+  const { documents, refresh } = useDocuments()
 
   const { uploadFiles, isUploading, uploadingFileName, error: uploadError, clearError } =
-    useIngest(handleDocUploaded)
+    useIngest(refresh)
 
   const { submitQuery, isQuerying } = useRagQuery()
 
@@ -81,7 +62,7 @@ function Home() {
       >
         <ChatPanel
           messages={messages}
-          docs={docs}
+          documents={documents}
           isUploading={isUploading}
           uploadingFileName={uploadingFileName}
           uploadError={uploadError}

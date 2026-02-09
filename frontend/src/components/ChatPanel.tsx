@@ -2,11 +2,11 @@ import { useRef, useEffect } from 'react'
 import { DocumentList } from './DocumentList'
 import { MessageBubble } from './MessageBubble'
 import { QueryInput } from './QueryInput'
-import type { Message, UploadedDoc } from '../lib/types'
+import type { Message, DocumentResponse } from '../lib/types'
 
 interface ChatPanelProps {
   messages: Message[]
-  docs: UploadedDoc[]
+  documents: DocumentResponse[]
   isUploading: boolean
   uploadingFileName: string | null
   uploadError: string | null
@@ -18,7 +18,7 @@ interface ChatPanelProps {
 
 export function ChatPanel({
   messages,
-  docs,
+  documents,
   isUploading,
   uploadingFileName,
   uploadError,
@@ -36,7 +36,7 @@ export function ChatPanel({
   return (
     <div className="flex h-full flex-col">
       <DocumentList
-        docs={docs}
+        documents={documents}
         isUploading={isUploading}
         uploadingFileName={uploadingFileName}
         error={uploadError}
@@ -45,7 +45,7 @@ export function ChatPanel({
       />
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-        {messages.length === 0 && docs.length > 0 && (
+        {messages.length === 0 && documents.length > 0 && (
           <div className="flex items-center justify-center h-full text-sm text-stone-400">
             Ask a question about your documents
           </div>
@@ -90,7 +90,7 @@ export function ChatPanel({
       <QueryInput
         disabled={false}
         isQuerying={isQuerying}
-        hasDocuments={docs.length > 0}
+        hasDocuments={documents.length > 0}
         onSubmit={onSubmitQuery}
       />
     </div>
