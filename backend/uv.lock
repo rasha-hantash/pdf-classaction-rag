@@ -313,6 +313,7 @@ dependencies = [
     { name = "pymupdf" },
     { name = "pytesseract" },
     { name = "python-multipart" },
+    { name = "reducto" },
     { name = "tiktoken" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -324,6 +325,9 @@ dev = [
 ocr = [
     { name = "pillow" },
     { name = "pytesseract" },
+]
+reducto = [
+    { name = "reductoai" },
 ]
 
 [package.metadata]
@@ -340,10 +344,12 @@ requires-dist = [
     { name = "pytesseract", marker = "extra == 'ocr'", specifier = ">=0.3.10" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "python-multipart", specifier = ">=0.0.6" },
+    { name = "reducto", specifier = ">=1.0.3" },
+    { name = "reductoai", marker = "extra == 'reducto'", specifier = ">=0.16.0" },
     { name = "tiktoken", specifier = ">=0.5.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.27.0" },
 ]
-provides-extras = ["dev", "ocr"]
+provides-extras = ["dev", "ocr", "reducto"]
 
 [[package]]
 name = "pgvector"
@@ -567,6 +573,33 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/da/92/1446574745d74df0c92e6aa4a7b0b3130706a4142b2d1a5869f2eaa423c6/pyyaml-6.0.3-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:16249ee61e95f858e83976573de0f5b2893b3677ba71c9dd36b9cf8be9ac6d65", size = 829923, upload-time = "2025-09-25T21:32:54.537Z" },
     { url = "https://files.pythonhosted.org/packages/f0/7a/1c7270340330e575b92f397352af856a8c06f230aa3e76f86b39d01b416a/pyyaml-6.0.3-cp314-cp314t-win_amd64.whl", hash = "sha256:4ad1906908f2f5ae4e5a8ddfce73c320c2a1429ec52eafd27138b7f1cbe341c9", size = 174062, upload-time = "2025-09-25T21:32:55.767Z" },
     { url = "https://files.pythonhosted.org/packages/f1/12/de94a39c2ef588c7e6455cfbe7343d3b2dc9d6b6b2f40c4c6565744c873d/pyyaml-6.0.3-cp314-cp314t-win_arm64.whl", hash = "sha256:ebc55a14a21cb14062aa4162f906cd962b28e2e9ea38f9b4391244cd8de4ae0b", size = 149341, upload-time = "2025-09-25T21:32:56.828Z" },
+]
+
+[[package]]
+name = "reducto"
+version = "1.0.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e2/53/df563f07f67da243ef86d2ea1a4434d8c0fd234ffd37650cc28adbf8e66f/reducto-1.0.3.tar.gz", hash = "sha256:e56a0ebc53e7cec937144e29edeb216ae88b28cf168361d964b7a74ef5c48b96", size = 68159, upload-time = "2021-10-03T21:30:48.69Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/59/b4bf0a07ca73de20dad52a139d3aa4ba2589047f31e676369e8e9b9e31d6/reducto-1.0.3-py3-none-any.whl", hash = "sha256:126e64a9ccfc1391ca938fa18ebdb4622257c1161db2f8aef8722e623f2f9499", size = 19973, upload-time = "2021-10-03T21:30:45.923Z" },
+]
+
+[[package]]
+name = "reductoai"
+version = "0.16.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "numpy" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ef/b3/aba919f6b35076a2c610b9bef67fb075205533b2868cc76f0ea3b9a7e087/reductoai-0.16.0.tar.gz", hash = "sha256:6daa1b0f6825ec437a8e8a43be6b238c3c60ba0c68c6d46e5eaed9800836480c", size = 300622, upload-time = "2026-01-06T19:36:34.616Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6e/1e/c170866fa75cf577692edd49d8a2d4baf883f70d1270b45e436d8b9d9761/reductoai-0.16.0-py3-none-any.whl", hash = "sha256:2f12974d90c3925d9e90700d7c63fdeee7dc20179974e2047ed2a3e8e75148c4", size = 145115, upload-time = "2026-01-06T19:36:33.561Z" },
 ]
 
 [[package]]
