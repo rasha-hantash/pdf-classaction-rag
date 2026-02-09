@@ -133,12 +133,19 @@ def ingest_document(
     existing = db.get_document_by_hash(file_hash)
     if existing:
         if existing.status == "error":
-            db.delete_document(existing.id)
-            logger.info(
-                "deleted previous error document for re-processing",
-                document_id=str(existing.id),
-                file_hash=file_hash,
-            )
+            deleted = db.delete_document(existing.id)
+            if deleted:
+                logger.info(
+                    "deleted previous error document for re-processing",
+                    document_id=str(existing.id),
+                    file_hash=file_hash,
+                )
+            else:
+                # Another concurrent request already deleted this document;
+                # re-fetch to see current state
+                existing = db.get_document_by_hash(file_hash)
+                if existing:
+                    return IngestResult(document=existing, chunks_count=0, was_duplicate=True)
         else:
             logger.info(
                 "document already exists",
