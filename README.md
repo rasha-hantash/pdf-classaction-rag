@@ -1,13 +1,37 @@
 # PDF RAG Pipeline
 
-A document ingestion and retrieval-augmented generation (RAG) system for PDF processing.
+A retrieval-augmented generation system for querying legal documents (e.g. class-action settlement PDFs). Upload PDFs, ingest them into a vector store, and ask questions with source-backed answers.
+
+## Architecture
+
+```
+┌──────────────┐       ┌──────────────────┐       ┌──────────────────────┐
+│   Frontend   │──────▶│  Backend (API)   │──────▶│  PostgreSQL+pgvector │
+│  React/TS    │◀──────│  FastAPI/Python  │◀──────│                      │
+└──────────────┘       └──────┬───────────┘       └──────────────────────┘
+                              │
+                   ┌──────────┴──────────┐
+                   │                     │
+             ┌─────▼─────┐        ┌──────▼──────┐
+             │  OpenAI   │        │   Claude    │
+             │ Embeddings│        │ Generation  │
+             └───────────┘        └─────────────┘
+```
+
+**Pipeline:**
+
+1. **Ingestion** — Parse PDFs (PyMuPDF or Reducto), chunk text semantically, generate embeddings (OpenAI `text-embedding-3-small`), store in pgvector.
+2. **Retrieval** — Embed the user's query, run cosine similarity search against stored chunks, return top-k results.
+3. **Generation** — Build context from retrieved chunks (with source file + page number), send to Claude with a grounded system prompt, return answer + citations.
 
 ## Requirements
 
 - Python 3.14+
+- Node.js 18+
 - Docker (for PostgreSQL + pgvector)
 - OpenAI API key (for embeddings)
 - Anthropic API key (for RAG responses)
+- Reducto API key (optional, for cloud PDF parsing)
 
 ## Setup
 
@@ -19,27 +43,51 @@ docker compose up -d
 
 This starts PostgreSQL 16 with pgvector on port 5432.
 
-### 2. Install dependencies
+### 2. Install backend dependencies
 
 ```bash
-uv sync
+cd backend && uv sync
 ```
 
-### 3. Set environment variables
+### 3. Install frontend dependencies
+
+```bash
+cd frontend && npm install
+```
+
+### 4. Set environment variables
 
 ```bash
 export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/pdf_llm_rag
 export OPENAI_API_KEY=sk-...
 export ANTHROPIC_API_KEY=sk-ant-...
+# Optional: provide REDUCTO_API_KEY if using the reducto parser
+export REDUCTO_API_KEY=...
 ```
 
-## Running the Server
+## Running
+
+### Backend
 
 ```bash
-uv run python main.py
+cd backend && uv run python main.py
 ```
 
-The server runs at http://localhost:8000. API docs available at http://localhost:8000/docs.
+Use `--pdf-parser` to select the parsing backend:
+
+```bash
+cd backend && uv run python main.py --pdf-parser reducto
+```
+
+The API runs at http://localhost:8000. Docs at http://localhost:8000/docs.
+
+### Frontend
+
+```bash
+cd frontend && npm run dev
+```
+
+The UI runs at http://localhost:3000 and proxies API requests to the backend.
 
 ## API Endpoints
 
@@ -47,18 +95,19 @@ The server runs at http://localhost:8000. API docs available at http://localhost
 |--------|----------|-------------|
 | GET | `/health` | Liveness check |
 | GET | `/ready` | Readiness check (DB connectivity) |
-| POST | `/api/v1/rag/ingest` | Upload and ingest a PDF file |
+| POST | `/api/v1/rag/ingest/batch` | Upload and ingest PDF files |
 | POST | `/api/v1/rag/query` | Ask a question using RAG |
+| GET | `/api/v1/rag/documents` | List ingested documents |
 
 ## Usage Examples
 
-### Ingest a PDF
+### Ingest PDFs
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/rag/ingest \
-  -F "file=@document.pdf"
+curl -X POST http://localhost:8000/api/v1/rag/ingest/batch \
+  -F "files=@document1.pdf" \
+  -F "files=@document2.pdf"
 ```
-
 
 ### Query the documents
 
@@ -68,11 +117,10 @@ curl -X POST http://localhost:8000/api/v1/rag/query \
   -d '{"question": "What is this document about?", "top_k": 5}'
 ```
 
-
 ## Running Tests
 
 ```bash
-uv run pytest tests/ -v
+cd backend && uv run pytest tests/ -v
 ```
 
 Tests require the database to be running. The test suite uses table truncation for isolation between tests.
@@ -80,69 +128,56 @@ Tests require the database to be running. The test suite uses table truncation f
 ## Project Structure
 
 ```
-conakry/
-├── main.py                      # Server entry point
-├── docker-compose.yaml          # PostgreSQL + pgvector
-├── migrations/                  # Database migrations
-├── src/pdf_llm_server/
-│   ├── server.py               # FastAPI REST API
-│   ├── logger.py               # Structured JSON logging
-│   └── rag/
-│       ├── database.py         # PgVectorStore
-│       ├── embeddings.py       # OpenAI embeddings
-│       ├── ingestion.py        # PDF ingestion pipeline
-│       ├── retriever.py        # RAG query with Claude
-│       ├── pdf_parser.py       # PyMuPDF parsing
-│       ├── chunking.py         # Text chunking strategies
-│       └── ocr.py              # OCR detection
-└── tests/
+pdf-classaction-rag/
+├── backend/
+│   ├── main.py                          # Server entry point
+│   ├── migrations/                      # Database migrations (golang-migrate)
+│   ├── src/pdf_llm_server/
+│   │   ├── server.py                    # FastAPI REST API
+│   │   ├── logger.py                    # Structured JSON logging
+│   │   └── rag/
+│   │       ├── database.py              # PgVectorStore
+│   │       ├── embeddings.py            # OpenAI embeddings
+│   │       ├── ingestion.py             # PDF ingestion pipeline
+│   │       ├── retriever.py             # RAG query with Claude
+│   │       ├── pdf_parser.py            # PyMuPDF parsing + parser dispatch
+│   │       ├── reducto_parser.py        # Reducto cloud API parser
+│   │       ├── parser_models.py         # Shared parser data models
+│   │       ├── chunking.py              # Text chunking strategies
+│   │       └── ocr.py                   # OCR detection
+│   └── tests/
+├── frontend/
+│   └── src/
+│       ├── routes/                      # TanStack Router file-based routes
+│       ├── components/                  # React components
+│       ├── hooks/                       # Custom hooks (useIngest, useRagQuery)
+│       ├── lib/                         # Types and API client
+│       └── styles/                      # TailwindCSS globals
+├── docker-compose.yaml                  # PostgreSQL + pgvector
+└── Taskfile.yml                         # Task runner config
 ```
 
+## Features
 
- ---                                                                                                                                                                                                        
-  What I Built: PDF RAG Pipeline                                                                                                                                                                           
-                                                                                                                                                                                                             
-  A retrieval-augmented generation system for querying legal documents (Facebook privacy settlement PDFs).                                                                                                 
+- [x] PDF parsing with PyMuPDF (text blocks, tables, font/heading classification)
+- [x] Reducto cloud API parser (configurable via `PDF_PARSER` env var)
+- [x] OCR support via Tesseract (auto-fallback for pages with corrupted/garbage text)
+- [x] Semantic chunking (paragraph-aware) and fixed-size chunking
+- [x] OpenAI embeddings (`text-embedding-3-small`, 1536 dimensions)
+- [x] Vector similarity search with pgvector (cosine distance)
+- [x] Relevance score threshold filtering
+- [x] RAG generation with Claude (grounded answers with source citations)
+- [x] Batch PDF upload with parallel ingestion (ThreadPoolExecutor)
+- [x] File deduplication via SHA-256 hashing
+- [x] File size validation and path traversal protection
+- [x] React frontend with chat UI, evidence panel, and PDF page viewer
+- [x] Structured JSON logging (slog-compatible)
+- [x] Database migrations (golang-migrate)
 
-  The Pipeline
+## TODO
 
-  1. Ingestion
-  - Parse PDFs using PyMuPDF (fitz) → extracts text blocks, tables, page numbers
-  - Chunk the content (more on this below)
-  - Generate embeddings via OpenAI text-embedding-3-small (1536 dimensions)
-  - Store in PostgreSQL with pgvector extension
-
-  2. Retrieval
-  - User asks a question → generate embedding for the query
-  - Cosine similarity search against stored chunks (using pgvector's <=> operator)
-  - Return top-k most relevant chunks
-
-  3. Generation
-  - Build context from retrieved chunks (includes source file, page number)
-  - Send to Claude with a system prompt that says "only use the provided context"
-  - Return answer + source references
-
-  Chunking Strategy
-
-  I have two options:
-  - Semantic chunking: Splits by paragraph boundaries (double newlines), merges small paragraphs together up to ~1500 chars. Falls back to fixed-size if a single paragraph is huge.
-  - Fixed-size chunking: 1000 chars with 200 char overlap, tries to break at word boundaries.
-
-  I went with semantic as the default because legal docs have natural paragraph structure, and keeping paragraphs intact preserves meaning better than arbitrary cuts.
-
-  A Few Things I'd Improve
-
-  - Hybrid search: Add BM25/keyword search alongside vector search. Legal docs have specific terms (case numbers, dates) that exact match would catch better.
-  - Chunk size tuning: 1500 chars was a guess. Would want to experiment based on retrieval quality.
-  - Reranking: After initial retrieval, could use a cross-encoder to rerank results before sending to the LLM.
-  - OCR: I detect if a PDF might need OCR (scanned docs) but don't actually run it yet.
-  - Batch uploads: Allow the user to upload all their PDF files in a batch
-  - Figure out teh following bug: The issue is embedded fonts with corrupted encoding on pages 52-56. PyMuPDF is extracting binary garbage instead of readable text because these pages use fonts with broken or non-standard character mappings. - Feldman Appeal 0021 Appellants Opening Brief 050424.pdf - Contains NUL (0x00) characters in the
-  text that PostgreSQL cannot store
-
-  Tech Stack
-
-  - Python, FastAPI
-  - PostgreSQL + pgvector
-  - OpenAI embeddings, Claude for generation
-  - PyMuPDF for PDF parsing
+- [ ] **Rate limiting** — Add API rate limiting to protect against abuse
+- [ ] **Telemetry** — Integrate OpenTelemetry with Grafana for observability (traces, metrics, logs)
+- [ ] **Hybrid search** — Add BM25/keyword search alongside vector search for better exact-match retrieval (case numbers, dates)
+- [ ] **Reranking** — Use a cross-encoder to rerank retrieval results before sending to the LLM
+- [ ] **Chunk size tuning** — Experiment with chunk sizes based on retrieval quality metrics

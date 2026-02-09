@@ -5,8 +5,10 @@ import time
 from html.parser import HTMLParser
 from pathlib import Path
 
+from reducto.reducto import Reducto
+
 from ..logger import logger
-from .pdf_parser import ParsedDocument, ParsedPage, TableData, TextBlock
+from .parser_models import ParsedDocument, ParsedPage, TableData, TextBlock
 
 
 class _TableHTMLParser(HTMLParser):
@@ -96,101 +98,111 @@ def _convert_bbox(bbox: dict) -> list[float]:
     return [left, top, left + width, top + height]
 
 
-def parse_pdf_reducto(file_path: str | Path) -> ParsedDocument:
-    """Parse a PDF file using the Reducto cloud API.
+class ReductoParser:
+    """PDF parser using the Reducto cloud API.
+
+    Initializes the Reducto client once and reuses it across parse calls.
 
     Args:
-        file_path: Path to the PDF file.
-
-    Returns:
-        ParsedDocument containing all extracted pages, blocks, and tables.
+        api_key: Reducto API key. If None, reads from REDUCTO_API_KEY env var.
 
     Raises:
-        ValueError: If REDUCTO_API_KEY environment variable is not set.
-        FileNotFoundError: If the PDF file does not exist.
+        ValueError: If no API key is provided or found in environment.
     """
-    from reducto import Reducto
 
-    file_path = Path(file_path)
-    if not file_path.exists():
-        raise FileNotFoundError(f"PDF file not found: {file_path}")
-
-    api_key = os.getenv("REDUCTO_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "REDUCTO_API_KEY environment variable is not set. "
-            "Set it to use the Reducto parser."
-        )
-
-    start = time.perf_counter()
-    logger.info("parsing pdf with reducto", file_path=str(file_path))
-
-    client = Reducto(api_key=api_key)
-    upload = client.upload(file=file_path)
-    result = client.parse.run(input=upload)
-
-    # Group blocks by page number
-    pages_dict: dict[int, dict] = {}
-
-    for chunk in result.chunks:
-        for block in chunk.blocks:
-            page_num = block.bbox.page if block.bbox else 0
-            if page_num not in pages_dict:
-                pages_dict[page_num] = {"blocks": [], "tables": []}
-
-            block_type_str = str(block.block_type) if block.block_type else "paragraph"
-
-            if block_type_str.lower() == "table":
-                # Parse table HTML content
-                content = block.content or ""
-                headers, rows = _parse_table_html(content)
-                table_index = len(pages_dict[page_num]["tables"])
-                pages_dict[page_num]["tables"].append(
-                    TableData(
-                        table_index=table_index,
-                        headers=headers,
-                        rows=rows,
-                    )
-                )
-            else:
-                mapped_type = _map_block_type(block_type_str)
-                bbox = _convert_bbox(block.bbox.__dict__) if block.bbox else None
-                block_index = len(pages_dict[page_num]["blocks"])
-                pages_dict[page_num]["blocks"].append(
-                    TextBlock(
-                        block_index=block_index,
-                        block_type=mapped_type,
-                        text=block.content or "",
-                        font_size=12.0,
-                        is_bold=mapped_type == "heading",
-                        bbox=bbox,
-                    )
-                )
-
-    # Build sorted page list
-    pages = []
-    for page_num in sorted(pages_dict.keys()):
-        page_data = pages_dict[page_num]
-        pages.append(
-            ParsedPage(
-                page_number=page_num,  # Reducto bbox.page is already 1-indexed
-                blocks=page_data["blocks"],
-                tables=page_data["tables"],
+    def __init__(self, api_key: str | None = None):
+        api_key = api_key or os.getenv("REDUCTO_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "REDUCTO_API_KEY environment variable is not set. "
+                "Set it or pass api_key to use the Reducto parser."
             )
+        self.client = Reducto(api_key=api_key)
+
+    def parse(self, file_path: str | Path) -> ParsedDocument:
+        """Parse a PDF file using the Reducto cloud API.
+
+        Args:
+            file_path: Path to the PDF file.
+
+        Returns:
+            ParsedDocument containing all extracted pages, blocks, and tables.
+
+        Raises:
+            FileNotFoundError: If the PDF file does not exist.
+        """
+        file_path = Path(file_path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"PDF file not found: {file_path}")
+
+        start = time.perf_counter()
+        logger.info("parsing pdf with reducto", file_path=str(file_path))
+
+        upload = self.client.upload(file=file_path)
+        result = self.client.parse.run(input=upload)
+
+        # Group blocks by page number
+        pages_dict: dict[int, dict] = {}
+
+        for chunk in result.chunks:
+            for block in chunk.blocks:
+                page_num = block.bbox.page if block.bbox else 0
+                if page_num not in pages_dict:
+                    pages_dict[page_num] = {"blocks": [], "tables": []}
+
+                block_type_str = str(block.block_type) if block.block_type else "paragraph"
+
+                if block_type_str.lower() == "table":
+                    # Parse table HTML content
+                    content = block.content or ""
+                    headers, rows = _parse_table_html(content)
+                    table_index = len(pages_dict[page_num]["tables"])
+                    pages_dict[page_num]["tables"].append(
+                        TableData(
+                            table_index=table_index,
+                            headers=headers,
+                            rows=rows,
+                        )
+                    )
+                else:
+                    mapped_type = _map_block_type(block_type_str)
+                    bbox = _convert_bbox(block.bbox.__dict__) if block.bbox else None
+                    block_index = len(pages_dict[page_num]["blocks"])
+                    pages_dict[page_num]["blocks"].append(
+                        TextBlock(
+                            block_index=block_index,
+                            block_type=mapped_type,
+                            text=block.content or "",
+                            font_size=12.0,
+                            is_bold=mapped_type == "heading",
+                            bbox=bbox,
+                        )
+                    )
+
+        # Build sorted page list
+        pages = []
+        for page_num in sorted(pages_dict.keys()):
+            page_data = pages_dict[page_num]
+            pages.append(
+                ParsedPage(
+                    page_number=page_num,  # Reducto bbox.page is already 1-indexed
+                    blocks=page_data["blocks"],
+                    tables=page_data["tables"],
+                )
+            )
+
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "pdf parsed with reducto",
+            file_path=str(file_path),
+            total_pages=len(pages),
+            total_blocks=sum(len(p.blocks) for p in pages),
+            total_tables=sum(len(p.tables) for p in pages),
+            duration_ms=round(duration_ms, 2),
         )
 
-    duration_ms = (time.perf_counter() - start) * 1000
-    logger.info(
-        "pdf parsed with reducto",
-        file_path=str(file_path),
-        total_pages=len(pages),
-        total_blocks=sum(len(p.blocks) for p in pages),
-        total_tables=sum(len(p.tables) for p in pages),
-        duration_ms=round(duration_ms, 2),
-    )
-
-    return ParsedDocument(
-        file_path=str(file_path),
-        total_pages=len(pages),
-        pages=pages,
-    )
+        return ParsedDocument(
+            file_path=str(file_path),
+            total_pages=len(pages),
+            pages=pages,
+        )

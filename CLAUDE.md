@@ -310,6 +310,84 @@ clear_context()
 3. **Log at appropriate levels**: `info` for normal operations, `error` for failures, `debug` for verbose output
 4. **Use structured fields** instead of string interpolation for queryable logs
 
+## Module & Import Hygiene
+
+### 1. No lazy imports inside functions
+
+All imports belong at the top of the module. Do not hide imports inside functions to defer loading:
+
+```python
+# BAD - import hidden inside function
+def parse_pdf_reducto(file_path):
+    from reducto import Reducto
+    client = Reducto(api_key=api_key)
+    ...
+
+# GOOD - import at module level
+from reducto.reducto import Reducto
+
+class ReductoParser:
+    def __init__(self, api_key):
+        self.client = Reducto(api_key=api_key)
+```
+
+If a dependency is optional, guard it at the module level with a try/except and a clear error at construction time — not by hiding the import.
+
+### 2. No circular imports — extract shared models
+
+When two modules need each other's symbols, extract the shared types into a separate module:
+
+```
+# BAD - circular: pdf_parser.py imports reducto_parser, reducto_parser imports pdf_parser
+pdf_parser.py  <-->  reducto_parser.py
+
+# GOOD - both import from a shared models module
+parser_models.py  <--  pdf_parser.py
+                  <--  reducto_parser.py
+```
+
+Shared Pydantic models and data classes should live in their own file (e.g., `parser_models.py`) so any module can import them without creating cycles.
+
+### 3. External clients should be classes, not per-call setup
+
+When integrating with external services (APIs, SDKs), wrap the client in a class that initializes once. Do not re-read env vars and re-create clients on every function call:
+
+```python
+# BAD - reads env var and creates client every call
+def parse(file_path):
+    api_key = os.getenv("REDUCTO_API_KEY")
+    client = Reducto(api_key=api_key)
+    return client.parse(file_path)
+
+# GOOD - class initializes once, reuses client
+class ReductoParser:
+    def __init__(self, api_key: str | None = None):
+        api_key = api_key or os.getenv("REDUCTO_API_KEY")
+        if not api_key:
+            raise ValueError("REDUCTO_API_KEY is not set")
+        self.client = Reducto(api_key=api_key)
+
+    def parse(self, file_path):
+        return self.client.parse(file_path)
+```
+
+### 4. Keep implementation details inside the responsible module
+
+Callers should not need to know internal details of a dependency. If module A dispatches to module B, don't duplicate B's internal logic in the caller:
+
+```python
+# BAD - caller knows that reducto doesn't need OCR
+parser = os.getenv("PDF_PARSER", "pymupdf")
+if parser == "reducto":
+    needs_ocr = False
+else:
+    needs_ocr = assess_needs_ocr(file_path)
+parsed_doc = parse_pdf(file_path)
+
+# GOOD - parse_pdf owns the OCR decision internally
+parsed_doc = parse_pdf(file_path)  # handles OCR assessment for pymupdf, skips for reducto
+```
+
 ## Deprecating / Removing Endpoints
 
 When removing an API endpoint, always do it in this order across separate PRs:

@@ -1,7 +1,6 @@
 """Document ingestion pipeline for the RAG system."""
 
 import hashlib
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -13,7 +12,6 @@ from .chunking import ChunkData, chunk_parsed_document
 from .database import PgVectorStore
 from .embeddings import EmbeddingClient
 from .models import IngestedDocument
-from .ocr import assess_needs_ocr
 from .pdf_parser import parse_pdf
 
 
@@ -138,20 +136,7 @@ def ingest_document(
         )
         return IngestResult(document=existing, chunks_count=0, was_duplicate=True)
 
-    # Step 3: Assess OCR needs (skip for Reducto - it handles OCR internally)
-    parser = os.getenv("PDF_PARSER", "pymupdf").lower()
-    if parser == "reducto":
-        needs_ocr = False
-    else:
-        needs_ocr = assess_needs_ocr(file_path)
-    if needs_ocr:
-        logger.warn(
-            "document may need ocr",
-            file_path=str(file_path),
-            message="Text extraction may be incomplete for scanned documents",
-        )
-
-    # Step 4: Parse PDF
+    # Step 3: Parse PDF (parser handles OCR assessment internally)
     parsed_doc = parse_pdf(file_path)
 
     # Step 5: Chunk content
