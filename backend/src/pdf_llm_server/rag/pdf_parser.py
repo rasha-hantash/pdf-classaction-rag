@@ -5,10 +5,11 @@ import statistics
 from pathlib import Path
 
 import fitz  # PyMuPDF
-from pydantic import BaseModel
 
 from ..logger import logger
-from .ocr import ocr_page
+from .ocr import assess_needs_ocr, ocr_page
+from .parser_models import ParsedDocument, ParsedPage, TableData, TextBlock
+from .reducto_parser import ReductoParser
 
 # Threshold for detecting garbage text (corrupted font encodings)
 GARBAGE_CONTROL_CHAR_RATIO = 0.1  # >10% control chars = garbage
@@ -30,40 +31,6 @@ def _is_garbage_text(text: str) -> bool:
     ratio = control_chars / len(text)
     return ratio > GARBAGE_CONTROL_CHAR_RATIO
 
-
-class TextBlock(BaseModel):
-    """A text block extracted from a PDF page."""
-
-    block_index: int
-    block_type: str  # "heading", "paragraph", "list_item"
-    text: str
-    font_size: float
-    is_bold: bool
-    bbox: list[float] | None = None  # [x0, y0, x1, y1], None if unavailable
-
-
-class TableData(BaseModel):
-    """Table data extracted from a PDF page."""
-
-    table_index: int
-    headers: list[str]
-    rows: list[list[str]]
-
-
-class ParsedPage(BaseModel):
-    """A parsed PDF page containing blocks and tables."""
-
-    page_number: int
-    blocks: list[TextBlock]
-    tables: list[TableData]
-
-
-class ParsedDocument(BaseModel):
-    """A fully parsed PDF document."""
-
-    file_path: str
-    total_pages: int
-    pages: list[ParsedPage]
 
 
 def _extract_spans_info(block_dict: dict) -> tuple[str, float, bool]:
@@ -280,24 +247,45 @@ def parse_pdf_pymupdf(file_path: str | Path) -> ParsedDocument:
         doc.close()
 
 
-def parse_pdf(file_path: str | Path) -> ParsedDocument:
+def parse_pdf(
+    file_path: str | Path,
+    reducto_parser: ReductoParser | None = None,
+) -> ParsedDocument:
     """Parse a PDF file using the configured parser.
 
     The parser is selected via the PDF_PARSER environment variable:
     - "pymupdf" (default): Uses PyMuPDF for local parsing
     - "reducto": Uses Reducto cloud API for parsing
+
+    Args:
+        file_path: Path to the PDF file.
+        reducto_parser: ReductoParser instance to use when PDF_PARSER=reducto.
+
+    For the pymupdf parser, this also assesses OCR needs and logs a warning
+    if the document appears to be scanned. Reducto handles OCR internally.
     """
     parser = os.getenv("PDF_PARSER", "pymupdf").lower()
 
     if parser == "reducto":
-        from .reducto_parser import parse_pdf_reducto
-
-        return parse_pdf_reducto(file_path)
+        if reducto_parser is None:
+            raise ValueError(
+                "reducto_parser is required when PDF_PARSER=reducto. "
+                "Pass a ReductoParser instance to parse_pdf()."
+            )
+        return reducto_parser.parse(file_path)
 
     if parser != "pymupdf":
         logger.warn(
             "unknown PDF_PARSER value, falling back to pymupdf",
             parser=parser,
+        )
+
+    needs_ocr = assess_needs_ocr(file_path)
+    if needs_ocr:
+        logger.warn(
+            "document may need ocr",
+            file_path=str(file_path),
+            message="Text extraction may be incomplete for scanned documents",
         )
 
     return parse_pdf_pymupdf(file_path)

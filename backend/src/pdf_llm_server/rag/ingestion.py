@@ -1,7 +1,6 @@
 """Document ingestion pipeline for the RAG system."""
 
 import hashlib
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -13,8 +12,8 @@ from .chunking import ChunkData, chunk_parsed_document
 from .database import PgVectorStore
 from .embeddings import EmbeddingClient
 from .models import IngestedDocument
-from .ocr import assess_needs_ocr
 from .pdf_parser import parse_pdf
+from .reducto_parser import ReductoParser
 
 
 class PathValidationError(ValueError):
@@ -95,6 +94,7 @@ def ingest_document(
     chunking_strategy: str = "semantic",
     allowed_dirs: list[Path] | None = None,
     original_filename: str | None = None,
+    reducto_parser: ReductoParser | None = None,
 ) -> IngestResult:
     """Ingest a single PDF document into the RAG system.
 
@@ -109,6 +109,7 @@ def ingest_document(
             If provided, file_path must be within one of these directories.
         original_filename: Optional original filename to store in the database.
             If None, the file_path basename is used.
+        reducto_parser: Optional ReductoParser instance for Reducto-based parsing.
 
     Returns:
         IngestResult with document info and chunk count.
@@ -138,21 +139,8 @@ def ingest_document(
         )
         return IngestResult(document=existing, chunks_count=0, was_duplicate=True)
 
-    # Step 3: Assess OCR needs (skip for Reducto - it handles OCR internally)
-    parser = os.getenv("PDF_PARSER", "pymupdf").lower()
-    if parser == "reducto":
-        needs_ocr = False
-    else:
-        needs_ocr = assess_needs_ocr(file_path)
-    if needs_ocr:
-        logger.warn(
-            "document may need ocr",
-            file_path=str(file_path),
-            message="Text extraction may be incomplete for scanned documents",
-        )
-
-    # Step 4: Parse PDF
-    parsed_doc = parse_pdf(file_path)
+    # Step 3: Parse PDF (parser handles OCR assessment internally)
+    parsed_doc = parse_pdf(file_path, reducto_parser=reducto_parser)
 
     # Step 5: Chunk content
     chunk_data_list = chunk_parsed_document(parsed_doc, strategy=chunking_strategy)
@@ -230,6 +218,7 @@ class RAGIngestionPipeline:
         embedding_client: EmbeddingClient | None = None,
         chunking_strategy: str = "semantic",
         allowed_dirs: list[Path] | None = None,
+        reducto_parser: ReductoParser | None = None,
     ):
         """Initialize the ingestion pipeline.
 
@@ -240,11 +229,13 @@ class RAGIngestionPipeline:
             chunking_strategy: Default chunking strategy ("semantic" or "fixed").
             allowed_dirs: Optional list of allowed directories for path validation.
                 If provided, all ingested files must be within these directories.
+            reducto_parser: Optional ReductoParser instance for Reducto-based parsing.
         """
         self.db = db
         self.embedding_client = embedding_client
         self.chunking_strategy = chunking_strategy
         self.allowed_dirs = allowed_dirs
+        self.reducto_parser = reducto_parser
         # Store connection string for creating worker connections in parallel mode
         self._connection_string = db.connection_string
 
@@ -272,6 +263,7 @@ class RAGIngestionPipeline:
             chunking_strategy=self.chunking_strategy,
             allowed_dirs=self.allowed_dirs,
             original_filename=original_filename,
+            reducto_parser=self.reducto_parser,
         )
 
     def _ingest_worker(
@@ -283,7 +275,7 @@ class RAGIngestionPipeline:
         """Worker function for parallel ingestion with its own DB connection.
 
         Creates a new database connection for thread safety.
-        OpenAI client is thread-safe, so we reuse the embedding_client.
+        OpenAI and Reducto clients are thread-safe, so we reuse them.
         """
         worker_db = PgVectorStore(self._connection_string)
         worker_db.connect()
@@ -296,6 +288,7 @@ class RAGIngestionPipeline:
                 chunking_strategy=self.chunking_strategy,
                 allowed_dirs=self.allowed_dirs,
                 original_filename=original_filename,
+                reducto_parser=self.reducto_parser,
             )
         finally:
             worker_db.disconnect()
