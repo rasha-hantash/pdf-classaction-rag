@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react'
 import { ingestBatch } from '../lib/api'
-import type { UploadedDoc } from '../lib/types'
 
 interface UseIngestReturn {
   uploadFiles: (files: FileList) => Promise<void>
@@ -11,7 +10,7 @@ interface UseIngestReturn {
 }
 
 export function useIngest(
-  onDocUploaded: (doc: UploadedDoc) => void,
+  onUploadComplete: () => void,
 ): UseIngestReturn {
   const [isUploading, setIsUploading] = useState(false)
   const [uploadingFileName, setUploadingFileName] = useState<string | null>(
@@ -53,14 +52,9 @@ export function useIngest(
               errors.push(`${item.file_name}: ${item.error}`)
             } else if (item.was_duplicate) {
               errors.push(`${item.file_name} was already uploaded`)
-            } else if (item.document_id) {
-              onDocUploaded({
-                id: item.document_id,
-                name: item.file_name,
-                chunks: item.chunks_count,
-              })
             }
           }
+          onUploadComplete()
         } catch (e) {
           errors.push(e instanceof Error ? e.message : 'Upload failed')
         }
@@ -73,7 +67,7 @@ export function useIngest(
       setUploadingFileName(null)
       setIsUploading(false)
     },
-    [onDocUploaded],
+    [onUploadComplete],
   )
 
   const clearError = useCallback(() => setError(null), [])
