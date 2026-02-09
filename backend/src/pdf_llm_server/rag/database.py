@@ -80,6 +80,7 @@ class PgVectorStore:
         file_hash: str,
         file_path: str,
         metadata: dict | None = None,
+        file_size: int | None = None,
     ) -> IngestedDocument:
         metadata = metadata or {}
         start = time.perf_counter()
@@ -87,11 +88,11 @@ class PgVectorStore:
             with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
-                    INSERT INTO documents (file_hash, file_path, metadata)
-                    VALUES (%s, %s, %s)
-                    RETURNING id, file_hash, file_path, metadata, created_at
+                    INSERT INTO documents (file_hash, file_path, metadata, file_size)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id, file_hash, file_path, metadata, status, file_size, created_at
                     """,
-                    (file_hash, file_path, Json(metadata)),
+                    (file_hash, file_path, Json(metadata), file_size),
                 )
                 row = cur.fetchone()
             self.conn.commit()
@@ -173,7 +174,7 @@ class PgVectorStore:
                 SELECT
                     c.id, c.document_id, c.content, c.chunk_type, c.page_number,
                     c.position, c.embedding, c.bbox, c.created_at,
-                    d.id as doc_id, d.file_hash, d.file_path, d.metadata, d.created_at as doc_created_at,
+                    d.id as doc_id, d.file_hash, d.file_path, d.metadata, d.status, d.file_size, d.created_at as doc_created_at,
                     1 - (c.embedding <=> %s::vector) as score
                 FROM chunks c
                 JOIN documents d ON c.document_id = d.id
@@ -203,6 +204,8 @@ class PgVectorStore:
                 file_hash=row["file_hash"],
                 file_path=row["file_path"],
                 metadata=row["metadata"],
+                status=row["status"],
+                file_size=row["file_size"],
                 created_at=row["doc_created_at"],
             )
             results.append(SearchResult(chunk=chunk, score=row["score"], document=document))
@@ -219,7 +222,7 @@ class PgVectorStore:
     def get_documents(self) -> list[IngestedDocument]:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, file_hash, file_path, metadata, created_at FROM documents ORDER BY created_at DESC"
+                "SELECT id, file_hash, file_path, metadata, status, file_size, created_at FROM documents ORDER BY created_at DESC"
             )
             rows = cur.fetchall()
         return [IngestedDocument(**row) for row in rows]
@@ -227,7 +230,7 @@ class PgVectorStore:
     def get_document_by_hash(self, file_hash: str) -> IngestedDocument | None:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, file_hash, file_path, metadata, created_at FROM documents WHERE file_hash = %s",
+                "SELECT id, file_hash, file_path, metadata, status, file_size, created_at FROM documents WHERE file_hash = %s",
                 (file_hash,),
             )
             row = cur.fetchone()
@@ -239,6 +242,7 @@ class PgVectorStore:
         file_path: str,
         chunks: list[ChunkData],
         metadata: dict | None = None,
+        file_size: int | None = None,
     ) -> tuple[IngestedDocument, list[ChunkRecord]]:
         """Insert a document and its chunks atomically in a single transaction.
 
@@ -247,6 +251,7 @@ class PgVectorStore:
             file_path: Path to the file.
             chunks: List of ChunkData objects from the chunking module.
             metadata: Optional metadata to attach to the document.
+            file_size: Optional file size in bytes.
 
         Returns:
             Tuple of (IngestedDocument, list of inserted ChunkRecords).
@@ -260,11 +265,11 @@ class PgVectorStore:
                 # Insert document
                 cur.execute(
                     """
-                    INSERT INTO documents (file_hash, file_path, metadata)
-                    VALUES (%s, %s, %s)
-                    RETURNING id, file_hash, file_path, metadata, created_at
+                    INSERT INTO documents (file_hash, file_path, metadata, status, file_size)
+                    VALUES (%s, %s, %s, 'processed', %s)
+                    RETURNING id, file_hash, file_path, metadata, status, file_size, created_at
                     """,
-                    (file_hash, file_path, Json(metadata)),
+                    (file_hash, file_path, Json(metadata), file_size),
                 )
                 doc_row = cur.fetchone()
                 doc = IngestedDocument(**doc_row)
@@ -336,6 +341,41 @@ class PgVectorStore:
         except Exception as e:
             self.conn.rollback()
             logger.error("document delete failed", document_id=str(document_id), error=str(e))
+            raise
+
+    def update_document_status(
+        self,
+        document_id: UUID,
+        status: str,
+        error_message: str | None = None,
+    ) -> None:
+        start = time.perf_counter()
+        try:
+            with self.conn.cursor() as cur:
+                if error_message:
+                    cur.execute(
+                        """
+                        UPDATE documents
+                        SET status = %s, metadata = metadata || %s
+                        WHERE id = %s
+                        """,
+                        (status, Json({"error": error_message}), str(document_id)),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE documents SET status = %s WHERE id = %s",
+                        (status, str(document_id)),
+                    )
+            self.conn.commit()
+            duration_ms = (time.perf_counter() - start) * 1000
+            logger.info(
+                "document status updated",
+                document_id=str(document_id),
+                status=status,
+                duration_ms=round(duration_ms, 2),
+            )
+        except Exception:
+            self.conn.rollback()
             raise
 
     def truncate_tables(self) -> None:
