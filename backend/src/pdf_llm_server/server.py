@@ -200,6 +200,7 @@ def ingest_batch(files: list[UploadFile] = File(...)):
     results: list[BatchIngestItemResponse] = []
     valid_tmp_paths: list[Path] = []
     valid_filenames: list[str] = []
+    valid_file_sizes: list[int] = []
     all_tmp_paths: list[Path] = []
 
     # Phase 1: Validate each file and save to temp
@@ -242,6 +243,7 @@ def ingest_batch(files: list[UploadFile] = File(...)):
 
         valid_tmp_paths.append(tmp_path)
         valid_filenames.append(file_name)
+        valid_file_sizes.append(actual_size)
 
     # Phase 2: Batch ingest valid files
     try:
@@ -254,6 +256,7 @@ def ingest_batch(files: list[UploadFile] = File(...)):
             ingest_results = pipeline.ingest_batch(
                 file_paths=valid_tmp_paths,
                 original_filenames=valid_filenames,
+                file_sizes=valid_file_sizes,
             )
 
             for i, result in enumerate(ingest_results):
@@ -328,6 +331,8 @@ class DocumentResponse(BaseModel):
     id: UUID
     file_path: str
     chunks_count: int
+    status: str
+    file_size: int | None = None
     created_at: str
 
 
@@ -336,7 +341,7 @@ def list_documents():
     """List all ingested documents with chunk counts."""
     with db.conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
-            """SELECT d.id, d.file_path, d.created_at,
+            """SELECT d.id, d.file_path, d.status, d.file_size, d.created_at,
                       COUNT(c.id) AS chunks_count
                FROM documents d
                LEFT JOIN chunks c ON c.document_id = d.id
@@ -350,6 +355,8 @@ def list_documents():
             id=row["id"],
             file_path=row["file_path"],
             chunks_count=row["chunks_count"],
+            status=row["status"],
+            file_size=row["file_size"],
             created_at=row["created_at"].isoformat(),
         )
         for row in rows

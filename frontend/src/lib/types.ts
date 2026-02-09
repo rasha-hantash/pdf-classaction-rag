@@ -33,13 +33,9 @@ export interface DocumentResponse {
   id: string
   file_path: string
   chunks_count: number
+  status: 'processing' | 'processed' | 'error'
+  file_size: number | null
   created_at: string
-}
-
-export interface UploadedDoc {
-  id: string
-  name: string
-  chunks: number
 }
 
 export interface Message {

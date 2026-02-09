@@ -11,7 +11,7 @@ from ..logger import logger
 from .chunking import ChunkData, chunk_parsed_document
 from .database import PgVectorStore
 from .embeddings import EmbeddingClient
-from .models import IngestedDocument
+from .models import ChunkRecord, IngestedDocument
 from .pdf_parser import parse_pdf
 from .reducto_parser import ReductoParser
 
@@ -95,6 +95,7 @@ def ingest_document(
     allowed_dirs: list[Path] | None = None,
     original_filename: str | None = None,
     reducto_parser: ReductoParser | None = None,
+    file_size: int | None = None,
 ) -> IngestResult:
     """Ingest a single PDF document into the RAG system.
 
@@ -131,82 +132,123 @@ def ingest_document(
     # Step 2: Check for duplicates
     existing = db.get_document_by_hash(file_hash)
     if existing:
-        logger.info(
-            "document already exists",
-            file_path=str(file_path),
-            document_id=str(existing.id),
-            file_hash=file_hash,
-        )
-        return IngestResult(document=existing, chunks_count=0, was_duplicate=True)
-
-    # Step 3: Parse PDF (parser handles OCR assessment internally)
-    parsed_doc = parse_pdf(file_path, reducto_parser=reducto_parser)
-
-    # Step 5: Chunk content
-    chunk_data_list = chunk_parsed_document(parsed_doc, strategy=chunking_strategy)
-
-    # Step 6: Generate embeddings for chunks
-    if embedding_client and chunk_data_list:
-        texts = [chunk.content for chunk in chunk_data_list]
-        embed_start = time.perf_counter()
-        embedding_result = embedding_client.generate_embeddings(texts)
-        embed_duration_ms = (time.perf_counter() - embed_start) * 1000
-
-        # Validate embedding count matches chunk count
-        if len(embedding_result.embeddings) != len(chunk_data_list):
-            logger.error(
-                "embedding count mismatch",
+        if existing.status == "error":
+            deleted = db.delete_document(existing.id)
+            if deleted:
+                logger.info(
+                    "deleted previous error document for re-processing",
+                    document_id=str(existing.id),
+                    file_hash=file_hash,
+                )
+            else:
+                # Another concurrent request already deleted this document;
+                # re-fetch to see current state
+                existing = db.get_document_by_hash(file_hash)
+                if existing:
+                    return IngestResult(document=existing, chunks_count=0, was_duplicate=True)
+        else:
+            logger.info(
+                "document already exists",
                 file_path=str(file_path),
-                expected=len(chunk_data_list),
-                received=len(embedding_result.embeddings),
+                document_id=str(existing.id),
+                file_hash=file_hash,
             )
-            raise ValueError(
-                f"Embedding count mismatch: expected {len(chunk_data_list)}, got {len(embedding_result.embeddings)}"
-            )
+            return IngestResult(document=existing, chunks_count=0, was_duplicate=True)
 
-        # Assign embeddings to chunks
-        for i, chunk in enumerate(chunk_data_list):
-            chunk.embedding = embedding_result.embeddings[i]
-
-        if embedding_result.failed_indices:
-            logger.warn(
-                "some embeddings failed",
-                file_path=str(file_path),
-                failed_count=len(embedding_result.failed_indices),
-                total_count=len(texts),
-            )
-
-        logger.info(
-            "embeddings generated",
-            file_path=str(file_path),
-            chunks_count=len(texts),
-            success_count=embedding_result.success_count,
-            duration_ms=round(embed_duration_ms, 2),
-        )
-
-    # Step 7: Insert document and chunks atomically in a single transaction
+    # Step 3: Create document with 'processing' status
     stored_path = original_filename if original_filename else str(file_path)
-    document, chunk_records = db.insert_document_with_chunks(
+    document = db.insert_document(
         file_hash=file_hash,
         file_path=stored_path,
-        chunks=chunk_data_list,
         metadata=metadata or {},
+        file_size=file_size,
     )
 
-    duration_ms = (time.perf_counter() - start) * 1000
-    logger.info(
-        "document ingested",
-        document_id=str(document.id),
-        file_path=str(file_path),
-        chunks_count=len(chunk_records),
-        duration_ms=round(duration_ms, 2),
-    )
+    try:
+        # Step 4: Parse PDF (parser handles OCR assessment internally)
+        parsed_doc = parse_pdf(file_path, reducto_parser=reducto_parser)
 
-    return IngestResult(
-        document=document,
-        chunks_count=len(chunk_records),
-        was_duplicate=False,
-    )
+        # Step 5: Chunk content
+        chunk_data_list = chunk_parsed_document(parsed_doc, strategy=chunking_strategy)
+
+        # Step 6: Generate embeddings for chunks
+        if embedding_client and chunk_data_list:
+            texts = [chunk.content for chunk in chunk_data_list]
+            embed_start = time.perf_counter()
+            embedding_result = embedding_client.generate_embeddings(texts)
+            embed_duration_ms = (time.perf_counter() - embed_start) * 1000
+
+            if len(embedding_result.embeddings) != len(chunk_data_list):
+                logger.error(
+                    "embedding count mismatch",
+                    file_path=str(file_path),
+                    expected=len(chunk_data_list),
+                    received=len(embedding_result.embeddings),
+                )
+                raise ValueError(
+                    f"Embedding count mismatch: expected {len(chunk_data_list)}, got {len(embedding_result.embeddings)}"
+                )
+
+            for i, chunk in enumerate(chunk_data_list):
+                chunk.embedding = embedding_result.embeddings[i]
+
+            if embedding_result.failed_indices:
+                logger.warn(
+                    "some embeddings failed",
+                    file_path=str(file_path),
+                    failed_count=len(embedding_result.failed_indices),
+                    total_count=len(texts),
+                )
+
+            logger.info(
+                "embeddings generated",
+                file_path=str(file_path),
+                chunks_count=len(texts),
+                success_count=embedding_result.success_count,
+                duration_ms=round(embed_duration_ms, 2),
+            )
+
+        # Step 7: Build ChunkRecord objects and insert chunks
+        chunk_records_data = [
+            ChunkRecord(
+                document_id=document.id,
+                content=chunk.content,
+                chunk_type=chunk.chunk_type,
+                page_number=chunk.page_number,
+                position=chunk.position,
+                embedding=chunk.embedding,
+                bbox=chunk.bbox,
+            )
+            for chunk in chunk_data_list
+        ]
+        inserted_chunks = db.insert_chunks(chunk_records_data)
+
+        # Step 8: Mark as processed
+        db.update_document_status(document.id, "processed")
+
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "document ingested",
+            document_id=str(document.id),
+            file_path=str(file_path),
+            chunks_count=len(inserted_chunks),
+            duration_ms=round(duration_ms, 2),
+        )
+
+        return IngestResult(
+            document=document,
+            chunks_count=len(inserted_chunks),
+            was_duplicate=False,
+        )
+    except Exception as e:
+        try:
+            db.update_document_status(document.id, "error", error_message=str(e))
+        except Exception:
+            logger.error(
+                "failed to update document status to error",
+                document_id=str(document.id),
+            )
+        raise
 
 
 class RAGIngestionPipeline:
@@ -244,6 +286,7 @@ class RAGIngestionPipeline:
         file_path: str | Path,
         metadata: dict | None = None,
         original_filename: str | None = None,
+        file_size: int | None = None,
     ) -> IngestResult:
         """Ingest a single document.
 
@@ -251,6 +294,7 @@ class RAGIngestionPipeline:
             file_path: Path to the PDF file.
             metadata: Optional metadata to attach.
             original_filename: Optional original filename to store in the database.
+            file_size: Optional file size in bytes.
 
         Returns:
             IngestResult with document info and chunk count.
@@ -264,6 +308,7 @@ class RAGIngestionPipeline:
             allowed_dirs=self.allowed_dirs,
             original_filename=original_filename,
             reducto_parser=self.reducto_parser,
+            file_size=file_size,
         )
 
     def _ingest_worker(
@@ -271,6 +316,7 @@ class RAGIngestionPipeline:
         file_path: str | Path,
         metadata: dict | None,
         original_filename: str | None = None,
+        file_size: int | None = None,
     ) -> IngestResult:
         """Worker function for parallel ingestion with its own DB connection.
 
@@ -289,6 +335,7 @@ class RAGIngestionPipeline:
                 allowed_dirs=self.allowed_dirs,
                 original_filename=original_filename,
                 reducto_parser=self.reducto_parser,
+                file_size=file_size,
             )
         finally:
             worker_db.disconnect()
@@ -299,6 +346,7 @@ class RAGIngestionPipeline:
         metadata: dict | None = None,
         max_workers: int = 4,
         original_filenames: list[str] | None = None,
+        file_sizes: list[int] | None = None,
     ) -> list[IngestResult]:
         """Ingest multiple documents in parallel.
 
@@ -336,7 +384,8 @@ class RAGIngestionPipeline:
             for i, file_path in enumerate(file_paths):
                 try:
                     fname = original_filenames[i] if original_filenames else None
-                    result = self.ingest(file_path, metadata, original_filename=fname)
+                    fsize = file_sizes[i] if file_sizes else None
+                    result = self.ingest(file_path, metadata, original_filename=fname, file_size=fsize)
                     results_dict[i] = result
                 except Exception as e:
                     logger.error(
@@ -363,6 +412,7 @@ class RAGIngestionPipeline:
                         fp,
                         metadata,
                         original_filenames[i] if original_filenames else None,
+                        file_sizes[i] if file_sizes else None,
                     ): i
                     for i, fp in enumerate(file_paths)
                 }

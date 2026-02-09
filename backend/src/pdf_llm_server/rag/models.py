@@ -9,6 +9,8 @@ class IngestedDocument(BaseModel):
     file_hash: str
     file_path: str
     metadata: dict = Field(default_factory=dict)
+    status: str = "processing"
+    file_size: int | None = None
     created_at: datetime
 
 
