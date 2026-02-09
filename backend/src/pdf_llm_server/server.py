@@ -19,7 +19,7 @@ from .rag import (
     PgVectorStore,
     RAGIngestionPipeline,
     RAGRetriever,
-    ingest_document,
+    ReductoParser,
 )
 
 # Maximum file size for uploads (50MB)
@@ -56,13 +56,6 @@ class QueryResponse(BaseModel):
     chunks_used: int
 
 
-class IngestResponse(BaseModel):
-    document_id: UUID | None = None
-    file_path: str
-    chunks_count: int = 0
-    was_duplicate: bool = False
-
-
 class BatchIngestItemResponse(BaseModel):
     file_name: str
     document_id: UUID | None = None
@@ -92,6 +85,7 @@ class ErrorResponse(BaseModel):
 
 db: PgVectorStore | None = None
 _embedding_client: EmbeddingClient | None = None
+_reducto_parser: ReductoParser | None = None
 _retriever: RAGRetriever | None = None
 
 
@@ -101,6 +95,14 @@ def get_embedding_client() -> EmbeddingClient:
     if _embedding_client is None:
         _embedding_client = EmbeddingClient()
     return _embedding_client
+
+
+def get_reducto_parser() -> ReductoParser | None:
+    """Lazy initialization of Reducto parser. Returns None if not configured."""
+    global _reducto_parser
+    if _reducto_parser is None and os.getenv("PDF_PARSER", "pymupdf").lower() == "reducto":
+        _reducto_parser = ReductoParser()
+    return _reducto_parser
 
 
 def get_retriever() -> RAGRetriever:
@@ -186,65 +188,6 @@ def ready():
 # --- RAG Endpoints ---
 
 
-@app.post("/api/v1/rag/ingest", response_model=IngestResponse)
-def ingest_file(file: UploadFile = File(...)):
-    """Ingest a PDF file via upload."""
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
-
-    # Check file size
-    if file.size and file.size > MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)}MB",
-        )
-
-    # Save to temp file (ingest_document expects a file path, not a stream)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        tmp_path = Path(tmp.name)
-        shutil.copyfileobj(file.file, tmp)
-
-    try:
-        # Check actual file size on disk (file.size can be None with chunked uploads)
-        actual_size = tmp_path.stat().st_size
-        if actual_size > MAX_UPLOAD_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024 * 1024)}MB",
-            )
-        # Validate PDF magic bytes
-        with open(tmp_path, "rb") as f:
-            header = f.read(5)
-        if header != b"%PDF-":
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid PDF file. File does not have valid PDF header.",
-            )
-
-        result = ingest_document(
-            file_path=tmp_path,
-            db=db,
-            embedding_client=get_embedding_client(),
-            original_filename=file.filename,
-        )
-        if result.error:
-            raise HTTPException(status_code=500, detail=result.error)
-
-        # Persist the PDF for later viewing
-        if result.document and not result.was_duplicate:
-            pdf_dest = PDF_STORAGE_DIR / f"{result.document.id}.pdf"
-            shutil.copy2(tmp_path, pdf_dest)
-
-        return IngestResponse(
-            document_id=result.document.id if result.document else None,
-            file_path=file.filename,
-            chunks_count=result.chunks_count,
-            was_duplicate=result.was_duplicate,
-        )
-    finally:
-        tmp_path.unlink(missing_ok=True)
-
-
 @app.post("/api/v1/rag/ingest/batch", response_model=BatchIngestResponse)
 def ingest_batch(files: list[UploadFile] = File(...)):
     """Ingest multiple PDF files via batch upload."""
@@ -304,7 +247,9 @@ def ingest_batch(files: list[UploadFile] = File(...)):
     try:
         if valid_tmp_paths:
             pipeline = RAGIngestionPipeline(
-                db=db, embedding_client=get_embedding_client()
+                db=db,
+                embedding_client=get_embedding_client(),
+                reducto_parser=get_reducto_parser(),
             )
             ingest_results = pipeline.ingest_batch(
                 file_paths=valid_tmp_paths,

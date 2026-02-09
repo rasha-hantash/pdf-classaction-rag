@@ -181,3 +181,15 @@ pdf-classaction-rag/
 - [ ] **Hybrid search** — Add BM25/keyword search alongside vector search for better exact-match retrieval (case numbers, dates)
 - [ ] **Reranking** — Use a cross-encoder to rerank retrieval results before sending to the LLM
 - [ ] **Chunk size tuning** — Experiment with chunk sizes based on retrieval quality metrics
+
+## Resources
+
+- [OpenAI Embeddings Guide](https://platform.openai.com/docs/guides/embeddings)
+- [Designing Production-Ready RAG Pipelines](https://hackernoon.com/designing-production-ready-rag-pipelines-tackling-latency-hallucinations-and-cost-at-scale)
+- [RAG Research Paper (arXiv)](https://arxiv.org/html/2412.15605v1)
+- [Agentic Chunking in LangChain](https://rusiruavb.medium.com/agentic-chunking-in-langchain-c9e4cf833196)
+- [Go Garbage Collection Guide](https://go.dev/doc/gc-guide)
+- [Diagnosing and Fixing Memory Leaks in Python](https://www.geeksforgeeks.org/python/diagnosing-and-fixing-memory-leaks-in-python/)
+- [Understanding Multipart Form Data](https://medium.com/@muhebollah.diu/understanding-multipart-form-data-the-ultimate-guide-for-beginners-fd039c04553d)
+- [RAGCache](https://www.emergentmind.com/topics/ragcache)
+- [Designing a Production-Grade RAG Architecture](https://levelup.gitconnected.com/designing-a-production-grade-rag-architecture-bee5a4e4d9aa)

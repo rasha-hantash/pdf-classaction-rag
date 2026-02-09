@@ -247,12 +247,19 @@ def parse_pdf_pymupdf(file_path: str | Path) -> ParsedDocument:
         doc.close()
 
 
-def parse_pdf(file_path: str | Path) -> ParsedDocument:
+def parse_pdf(
+    file_path: str | Path,
+    reducto_parser: ReductoParser | None = None,
+) -> ParsedDocument:
     """Parse a PDF file using the configured parser.
 
     The parser is selected via the PDF_PARSER environment variable:
     - "pymupdf" (default): Uses PyMuPDF for local parsing
     - "reducto": Uses Reducto cloud API for parsing
+
+    Args:
+        file_path: Path to the PDF file.
+        reducto_parser: ReductoParser instance to use when PDF_PARSER=reducto.
 
     For the pymupdf parser, this also assesses OCR needs and logs a warning
     if the document appears to be scanned. Reducto handles OCR internally.
@@ -260,7 +267,12 @@ def parse_pdf(file_path: str | Path) -> ParsedDocument:
     parser = os.getenv("PDF_PARSER", "pymupdf").lower()
 
     if parser == "reducto":
-        return ReductoParser().parse(file_path)
+        if reducto_parser is None:
+            raise ValueError(
+                "reducto_parser is required when PDF_PARSER=reducto. "
+                "Pass a ReductoParser instance to parse_pdf()."
+            )
+        return reducto_parser.parse(file_path)
 
     if parser != "pymupdf":
         logger.warn(
