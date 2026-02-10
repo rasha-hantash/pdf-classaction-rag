@@ -10,6 +10,21 @@ migrate create -ext sql -dir backend/migrations -seq <migration_name>
 
 This creates properly formatted migration files with sequential numbering.
 
+### Always add table and column descriptions
+
+Every migration that creates a table or adds a column must include `COMMENT ON` statements. This provides self-documenting schema metadata that helps AI tools, new developers, and database GUIs understand the data model:
+
+```sql
+-- When creating a table
+CREATE TABLE IF NOT EXISTS documents (...);
+COMMENT ON TABLE documents IS 'Ingested PDF documents with deduplication via content hash';
+COMMENT ON COLUMN documents.file_hash IS 'SHA-256 hash of file contents for deduplication';
+
+-- When adding a column
+ALTER TABLE chunks ADD COLUMN bbox JSONB;
+COMMENT ON COLUMN chunks.bbox IS 'Bounding box coordinates on the page as JSON {x0, y0, x1, y1}';
+```
+
 ## Repository Structure
 
 This is a monorepo with the following layout:
@@ -419,3 +434,17 @@ frontend/src/
 - Keep all shared types in `lib/types.ts` — do NOT create a separate `types/` directory
 - Do NOT create barrel exports for `lib/`
 - API wrappers go in `lib/api.ts`
+
+## Code Review (Mesa)
+
+[Mesa](https://mesa.dev) is an AI-powered code review platform that runs automated review agents on pull requests. It provides senior-level reviews with full codebase context and customizable standards.
+
+The `mesa.config.ts` file at the repo root configures which review agents run, what files they cover, and what rules they enforce. Each agent has:
+
+- **`name`** — label for the reviewer (e.g. `backend`, `frontend`, `security`, `database`)
+- **`model`** — reasoning tier (`high-reasoning` or `fast`)
+- **`context`** — how much of the codebase the agent can see (`full-codebase`)
+- **`fileMatch`** — glob patterns for which files trigger this agent
+- **`rules`** — project-specific rules the agent enforces during review
+
+Reviews are triggered on `pull_request` events. When updating project conventions in CLAUDE.md, also update the corresponding rules in `mesa.config.ts` to keep automated reviews in sync.
