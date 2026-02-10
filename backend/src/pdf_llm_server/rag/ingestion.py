@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from ..logger import logger
+from ..logger import clear_context, logger, set_context
 from .chunking import ChunkData, chunk_parsed_document
 from .database import PgVectorStore
 from .embeddings import EmbeddingClient
@@ -119,136 +119,136 @@ def ingest_document(
         PathValidationError: If file_path is outside allowed directories.
     """
     file_path = Path(file_path)
+    file_name = original_filename or file_path.name
+    set_context(file_name=file_name, file_path=str(file_path))
 
-    # Validate path if allowed_dirs is specified
-    if allowed_dirs is not None:
-        file_path = validate_file_path(file_path, allowed_dirs)
+    try:
+        # Validate path if allowed_dirs is specified
+        if allowed_dirs is not None:
+            file_path = validate_file_path(file_path, allowed_dirs)
 
-    start = time.perf_counter()
+        start = time.perf_counter()
 
-    # Step 1: Compute file hash for deduplication
-    file_hash = compute_file_hash(file_path)
+        # Step 1: Compute file hash for deduplication
+        file_hash = compute_file_hash(file_path)
 
-    # Step 2: Check for duplicates
-    existing = db.get_document_by_hash(file_hash)
-    if existing:
-        if existing.status == "error":
-            deleted = db.delete_document(existing.id)
-            if deleted:
+        # Step 2: Check for duplicates
+        existing = db.get_document_by_hash(file_hash)
+        if existing:
+            if existing.status == "error":
+                deleted = db.delete_document(existing.id)
+                if deleted:
+                    logger.info(
+                        "deleted previous error document for re-processing",
+                        document_id=str(existing.id),
+                        file_hash=file_hash,
+                    )
+                else:
+                    # Another concurrent request already deleted this document;
+                    # re-fetch to see current state
+                    existing = db.get_document_by_hash(file_hash)
+                    if existing:
+                        return IngestResult(document=existing, chunks_count=0, was_duplicate=True)
+            else:
                 logger.info(
-                    "deleted previous error document for re-processing",
+                    "document already exists",
                     document_id=str(existing.id),
                     file_hash=file_hash,
                 )
-            else:
-                # Another concurrent request already deleted this document;
-                # re-fetch to see current state
-                existing = db.get_document_by_hash(file_hash)
-                if existing:
-                    return IngestResult(document=existing, chunks_count=0, was_duplicate=True)
-        else:
-            logger.info(
-                "document already exists",
-                file_path=str(file_path),
-                document_id=str(existing.id),
-                file_hash=file_hash,
-            )
-            return IngestResult(document=existing, chunks_count=0, was_duplicate=True)
+                return IngestResult(document=existing, chunks_count=0, was_duplicate=True)
 
-    # Step 3: Create document with 'processing' status
-    stored_path = original_filename if original_filename else str(file_path)
-    document = db.insert_document(
-        file_hash=file_hash,
-        file_path=stored_path,
-        metadata=metadata or {},
-        file_size=file_size,
-    )
-
-    try:
-        # Step 4: Parse PDF (parser handles OCR assessment internally)
-        parsed_doc = parse_pdf(file_path, reducto_parser=reducto_parser)
-
-        # Step 5: Chunk content
-        chunk_data_list = chunk_parsed_document(parsed_doc, strategy=chunking_strategy)
-
-        # Step 6: Generate embeddings for chunks
-        if embedding_client and chunk_data_list:
-            texts = [chunk.content for chunk in chunk_data_list]
-            embed_start = time.perf_counter()
-            embedding_result = embedding_client.generate_embeddings(texts)
-            embed_duration_ms = (time.perf_counter() - embed_start) * 1000
-
-            if len(embedding_result.embeddings) != len(chunk_data_list):
-                logger.error(
-                    "embedding count mismatch",
-                    file_path=str(file_path),
-                    expected=len(chunk_data_list),
-                    received=len(embedding_result.embeddings),
-                )
-                raise ValueError(
-                    f"Embedding count mismatch: expected {len(chunk_data_list)}, got {len(embedding_result.embeddings)}"
-                )
-
-            for i, chunk in enumerate(chunk_data_list):
-                chunk.embedding = embedding_result.embeddings[i]
-
-            if embedding_result.failed_indices:
-                logger.warn(
-                    "some embeddings failed",
-                    file_path=str(file_path),
-                    failed_count=len(embedding_result.failed_indices),
-                    total_count=len(texts),
-                )
-
-            logger.info(
-                "embeddings generated",
-                file_path=str(file_path),
-                chunks_count=len(texts),
-                success_count=embedding_result.success_count,
-                duration_ms=round(embed_duration_ms, 2),
-            )
-
-        # Step 7: Build ChunkRecord objects and insert chunks
-        chunk_records_data = [
-            ChunkRecord(
-                document_id=document.id,
-                content=chunk.content,
-                chunk_type=chunk.chunk_type,
-                page_number=chunk.page_number,
-                position=chunk.position,
-                embedding=chunk.embedding,
-                bbox=chunk.bbox,
-            )
-            for chunk in chunk_data_list
-        ]
-        inserted_chunks = db.insert_chunks(chunk_records_data)
-
-        # Step 8: Mark as processed
-        db.update_document_status(document.id, "processed")
-
-        duration_ms = (time.perf_counter() - start) * 1000
-        logger.info(
-            "document ingested",
-            document_id=str(document.id),
-            file_path=str(file_path),
-            chunks_count=len(inserted_chunks),
-            duration_ms=round(duration_ms, 2),
+        # Step 3: Create document with 'processing' status
+        stored_path = original_filename if original_filename else str(file_path)
+        document = db.insert_document(
+            file_hash=file_hash,
+            file_path=stored_path,
+            metadata=metadata or {},
+            file_size=file_size,
         )
 
-        return IngestResult(
-            document=document,
-            chunks_count=len(inserted_chunks),
-            was_duplicate=False,
-        )
-    except Exception as e:
         try:
-            db.update_document_status(document.id, "error", error_message=str(e))
-        except Exception:
-            logger.error(
-                "failed to update document status to error",
+            # Step 4: Parse PDF (parser handles OCR assessment internally)
+            parsed_doc = parse_pdf(file_path, reducto_parser=reducto_parser)
+
+            # Step 5: Chunk content
+            chunk_data_list = chunk_parsed_document(parsed_doc, strategy=chunking_strategy)
+
+            # Step 6: Generate embeddings for chunks
+            if embedding_client and chunk_data_list:
+                texts = [chunk.content for chunk in chunk_data_list]
+                embed_start = time.perf_counter()
+                embedding_result = embedding_client.generate_embeddings(texts)
+                embed_duration_ms = (time.perf_counter() - embed_start) * 1000
+
+                if len(embedding_result.embeddings) != len(chunk_data_list):
+                    logger.error(
+                        "embedding count mismatch",
+                        expected=len(chunk_data_list),
+                        received=len(embedding_result.embeddings),
+                    )
+                    raise ValueError(
+                        f"Embedding count mismatch: expected {len(chunk_data_list)}, got {len(embedding_result.embeddings)}"
+                    )
+
+                for i, chunk in enumerate(chunk_data_list):
+                    chunk.embedding = embedding_result.embeddings[i]
+
+                if embedding_result.failed_indices:
+                    logger.warn(
+                        "some embeddings failed",
+                        failed_count=len(embedding_result.failed_indices),
+                        total_count=len(texts),
+                    )
+
+                logger.info(
+                    "embeddings generated",
+                    chunks_count=len(texts),
+                    success_count=embedding_result.success_count,
+                    duration_ms=round(embed_duration_ms, 2),
+                )
+
+            # Step 7: Build ChunkRecord objects and insert chunks
+            chunk_records_data = [
+                ChunkRecord(
+                    document_id=document.id,
+                    content=chunk.content,
+                    chunk_type=chunk.chunk_type,
+                    page_number=chunk.page_number,
+                    position=chunk.position,
+                    embedding=chunk.embedding,
+                    bbox=chunk.bbox,
+                )
+                for chunk in chunk_data_list
+            ]
+            inserted_chunks = db.insert_chunks(chunk_records_data)
+
+            # Step 8: Mark as processed
+            db.update_document_status(document.id, "processed")
+
+            duration_ms = (time.perf_counter() - start) * 1000
+            logger.info(
+                "document ingested",
                 document_id=str(document.id),
+                chunks_count=len(inserted_chunks),
+                duration_ms=round(duration_ms, 2),
             )
-        raise
+
+            return IngestResult(
+                document=document,
+                chunks_count=len(inserted_chunks),
+                was_duplicate=False,
+            )
+        except Exception as e:
+            try:
+                db.update_document_status(document.id, "error", error_message=str(e))
+            except Exception:
+                logger.error(
+                    "failed to update document status to error",
+                    document_id=str(document.id),
+                )
+            raise
+    finally:
+        clear_context()
 
 
 class RAGIngestionPipeline:

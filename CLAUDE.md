@@ -10,6 +10,21 @@ migrate create -ext sql -dir backend/migrations -seq <migration_name>
 
 This creates properly formatted migration files with sequential numbering.
 
+### Always add table and column descriptions
+
+Every migration that creates a table or adds a column must include `COMMENT ON` statements. This provides self-documenting schema metadata that helps AI tools, new developers, and database GUIs understand the data model:
+
+```sql
+-- When creating a table
+CREATE TABLE IF NOT EXISTS documents (...);
+COMMENT ON TABLE documents IS 'Ingested PDF documents with deduplication via content hash';
+COMMENT ON COLUMN documents.file_hash IS 'SHA-256 hash of file contents for deduplication';
+
+-- When adding a column
+ALTER TABLE chunks ADD COLUMN bbox JSONB;
+COMMENT ON COLUMN chunks.bbox IS 'Bounding box coordinates on the page as JSON {x0, y0, x1, y1}';
+```
+
 ## Repository Structure
 
 This is a monorepo with the following layout:
@@ -288,19 +303,28 @@ logger.error("operation failed", error=str(e), document_id="abc-123")
 
 ### Context Fields
 
-Use context fields for request-scoped data that should appear in all logs:
+Use `set_context` / `clear_context` to attach request-scoped data that should appear in **all** log entries for the duration of an operation. This avoids passing identifiers manually to every `logger` call.
+
+**When to use:** Any function that represents a top-level unit of work — an HTTP request handler, a background task worker, or a batch-processing entry point (e.g., `ingest_document`). Set context at the start of the function and clear it in a `finally` block so it is always cleaned up, even on exceptions.
+
+**When NOT to use:** Helper functions called within an already-contextualized scope. Only the outermost entry point should set and clear context.
 
 ```python
-from pdf_llm_server.logger import set_context, clear_context
+from pdf_llm_server.logger import set_context, clear_context, logger
 
-# Set context at request start
+# In an HTTP request handler
 set_context(request_id="req-123", user_id="user-456")
 
-# All subsequent logs include these fields
-logger.info("processing started")  # includes request_id and user_id
-
-# Clear at request end
-clear_context()
+# In a batch-processing entry point
+def ingest_document(file_path, file_name):
+    set_context(file_name=file_name)
+    try:
+        # All logs inside this block automatically include file_name
+        logger.info("processing started")
+        process(file_path)
+        logger.info("processing complete")
+    finally:
+        clear_context()
 ```
 
 ### Logging Guidelines
@@ -419,3 +443,17 @@ frontend/src/
 - Keep all shared types in `lib/types.ts` — do NOT create a separate `types/` directory
 - Do NOT create barrel exports for `lib/`
 - API wrappers go in `lib/api.ts`
+
+## Code Review (Mesa)
+
+[Mesa](https://mesa.dev) is an AI-powered code review platform that runs automated review agents on pull requests. It provides senior-level reviews with full codebase context and customizable standards.
+
+The `mesa.config.ts` file at the repo root configures which review agents run, what files they cover, and what rules they enforce. Each agent has:
+
+- **`name`** — label for the reviewer (e.g. `backend`, `frontend`, `security`, `database`)
+- **`model`** — reasoning tier (`high-reasoning` or `fast`)
+- **`context`** — how much of the codebase the agent can see (`full-codebase`)
+- **`fileMatch`** — glob patterns for which files trigger this agent
+- **`rules`** — project-specific rules the agent enforces during review
+
+Reviews are triggered on `pull_request` events. When updating project conventions in CLAUDE.md, also update the corresponding rules in `mesa.config.ts` to keep automated reviews in sync.
