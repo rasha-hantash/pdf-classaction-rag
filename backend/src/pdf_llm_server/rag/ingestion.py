@@ -120,7 +120,7 @@ def ingest_document(
     """
     file_path = Path(file_path)
     file_name = original_filename or file_path.name
-    set_context(file_name=file_name)
+    set_context(file_name=file_name, file_path=str(file_path))
 
     try:
         # Validate path if allowed_dirs is specified
@@ -152,7 +152,6 @@ def ingest_document(
             else:
                 logger.info(
                     "document already exists",
-                    file_path=str(file_path),
                     document_id=str(existing.id),
                     file_hash=file_hash,
                 )
@@ -184,7 +183,6 @@ def ingest_document(
                 if len(embedding_result.embeddings) != len(chunk_data_list):
                     logger.error(
                         "embedding count mismatch",
-                        file_path=str(file_path),
                         expected=len(chunk_data_list),
                         received=len(embedding_result.embeddings),
                     )
@@ -198,14 +196,12 @@ def ingest_document(
                 if embedding_result.failed_indices:
                     logger.warn(
                         "some embeddings failed",
-                        file_path=str(file_path),
                         failed_count=len(embedding_result.failed_indices),
                         total_count=len(texts),
                     )
 
                 logger.info(
                     "embeddings generated",
-                    file_path=str(file_path),
                     chunks_count=len(texts),
                     success_count=embedding_result.success_count,
                     duration_ms=round(embed_duration_ms, 2),
@@ -233,7 +229,6 @@ def ingest_document(
             logger.info(
                 "document ingested",
                 document_id=str(document.id),
-                file_path=str(file_path),
                 chunks_count=len(inserted_chunks),
                 duration_ms=round(duration_ms, 2),
             )

@@ -303,19 +303,28 @@ logger.error("operation failed", error=str(e), document_id="abc-123")
 
 ### Context Fields
 
-Use context fields for request-scoped data that should appear in all logs:
+Use `set_context` / `clear_context` to attach request-scoped data that should appear in **all** log entries for the duration of an operation. This avoids passing identifiers manually to every `logger` call.
+
+**When to use:** Any function that represents a top-level unit of work — an HTTP request handler, a background task worker, or a batch-processing entry point (e.g., `ingest_document`). Set context at the start of the function and clear it in a `finally` block so it is always cleaned up, even on exceptions.
+
+**When NOT to use:** Helper functions called within an already-contextualized scope. Only the outermost entry point should set and clear context.
 
 ```python
-from pdf_llm_server.logger import set_context, clear_context
+from pdf_llm_server.logger import set_context, clear_context, logger
 
-# Set context at request start
+# In an HTTP request handler
 set_context(request_id="req-123", user_id="user-456")
 
-# All subsequent logs include these fields
-logger.info("processing started")  # includes request_id and user_id
-
-# Clear at request end
-clear_context()
+# In a batch-processing entry point
+def ingest_document(file_path, file_name):
+    set_context(file_name=file_name)
+    try:
+        # All logs inside this block automatically include file_name
+        logger.info("processing started")
+        process(file_path)
+        logger.info("processing complete")
+    finally:
+        clear_context()
 ```
 
 ### Logging Guidelines
