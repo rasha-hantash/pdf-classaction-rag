@@ -4,8 +4,15 @@ import os
 import time
 from abc import ABC, abstractmethod
 
-import cohere
-from sentence_transformers import CrossEncoder
+try:
+    import cohere
+except ImportError:
+    cohere = None
+
+try:
+    from sentence_transformers import CrossEncoder
+except ImportError:
+    CrossEncoder = None
 
 from ..logger import logger
 from .models import SearchResult
@@ -52,6 +59,11 @@ class CohereReranker(Reranker):
         Raises:
             ValueError: If no API key is available.
         """
+        if cohere is None:
+            raise ImportError(
+                "cohere is required for CohereReranker. "
+                "Install it with: pip install pdf-classaction-rag[rerank-cohere]"
+            )
         api_key = api_key or os.getenv("COHERE_API_KEY")
         if not api_key:
             raise ValueError(
@@ -116,6 +128,11 @@ class CrossEncoderReranker(Reranker):
         Args:
             model_name: HuggingFace model name. Defaults to ms-marco-MiniLM-L-6-v2.
         """
+        if CrossEncoder is None:
+            raise ImportError(
+                "sentence-transformers is required for CrossEncoderReranker. "
+                "Install it with: pip install pdf-classaction-rag[rerank-local]"
+            )
         self._model_name = model_name or self.DEFAULT_MODEL
         start = time.perf_counter()
         self._model = CrossEncoder(self._model_name)
