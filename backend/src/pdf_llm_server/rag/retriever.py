@@ -12,9 +12,6 @@ from .database import PgVectorStore
 from .embeddings import EmbeddingClient
 from .models import SearchResult
 
-MIN_RELEVANCE_SCORE = 0.3
-
-
 class SourceReference(BaseModel):
     """A source reference from a retrieved chunk."""
 
@@ -88,23 +85,8 @@ Rules:
         """
         start = time.perf_counter()
 
-        # Generate query embedding
         query_embedding = self.embedding_client.generate_embedding(query)
-
-        # Search for similar chunks
-        results = self.db.similarity_search(query_embedding, top_k=top_k)
-
-        # Filter out low-relevance chunks
-        original_count = len(results)
-        results = [r for r in results if r.score >= MIN_RELEVANCE_SCORE]
-        filtered_count = original_count - len(results)
-        if filtered_count > 0:
-            logger.info(
-                "low relevance chunks filtered",
-                filtered_count=filtered_count,
-                remaining_count=len(results),
-                min_score=MIN_RELEVANCE_SCORE,
-            )
+        results = self.db.hybrid_search(query_embedding, query, top_k=top_k)
 
         duration_ms = (time.perf_counter() - start) * 1000
         logger.info(

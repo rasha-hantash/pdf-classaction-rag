@@ -197,3 +197,110 @@ class TestSimilaritySearch:
         random_embedding = [0.5] * 1536
         results = db.similarity_search(random_embedding, top_k=5)
         assert results == []
+
+
+class TestBm25Search:
+    def test__bm25_search_returns_matching_chunks(self, db):
+        doc = db.insert_document(
+            file_hash="hash_for_bm25",
+            file_path="/path/to/bm25.pdf",
+            metadata={},
+        )
+        chunks = [
+            ChunkRecord(
+                document_id=doc.id,
+                content="The plaintiff filed a class action lawsuit regarding securities fraud.",
+                chunk_type="paragraph",
+                page_number=1,
+                position=0,
+                embedding=[0.1] * 1536,
+            ),
+            ChunkRecord(
+                document_id=doc.id,
+                content="The company reported quarterly earnings for the fiscal year.",
+                chunk_type="paragraph",
+                page_number=2,
+                position=1,
+                embedding=[0.2] * 1536,
+            ),
+        ]
+        db.insert_chunks(chunks)
+
+        results = db._bm25_search("class action securities fraud", top_k=5)
+
+        assert len(results) >= 1
+        assert results[0].score > 0
+        assert results[0].document is not None
+
+    def test__bm25_search_empty_results(self, db):
+        results = db._bm25_search("xyznonexistentterm", top_k=5)
+        assert results == []
+
+    def test__bm25_search_respects_top_k(self, db):
+        doc = db.insert_document(
+            file_hash="hash_bm25_topk",
+            file_path="/path/to/topk.pdf",
+            metadata={},
+        )
+        chunks = [
+            ChunkRecord(
+                document_id=doc.id,
+                content=f"Legal document section {i} discusses legal matters.",
+                chunk_type="paragraph",
+                page_number=i,
+                position=i,
+            )
+            for i in range(5)
+        ]
+        db.insert_chunks(chunks)
+
+        results = db._bm25_search("legal document", top_k=2)
+        assert len(results) <= 2
+
+
+class TestHybridSearch:
+    def test_hybrid_search_combines_results(self, db):
+        doc = db.insert_document(
+            file_hash="hash_hybrid",
+            file_path="/path/to/hybrid.pdf",
+            metadata={},
+        )
+        chunks = [
+            ChunkRecord(
+                document_id=doc.id,
+                content="Securities fraud class action complaint filed in federal court.",
+                chunk_type="paragraph",
+                page_number=1,
+                position=0,
+                embedding=[0.1] * 1536,
+            ),
+            ChunkRecord(
+                document_id=doc.id,
+                content="Company financial report for quarterly earnings.",
+                chunk_type="paragraph",
+                page_number=2,
+                position=1,
+                embedding=[0.9] * 1536,
+            ),
+        ]
+        db.insert_chunks(chunks)
+
+        results = db.hybrid_search(
+            query_embedding=[0.1] * 1536,
+            query="securities fraud class action",
+            top_k=5,
+        )
+
+        assert len(results) >= 1
+        assert all(r.score > 0 for r in results)
+        # Results should be deduplicated (no duplicate chunk IDs)
+        chunk_ids = [str(r.chunk.id) for r in results]
+        assert len(chunk_ids) == len(set(chunk_ids))
+
+    def test_hybrid_search_empty_database(self, db):
+        results = db.hybrid_search(
+            query_embedding=[0.5] * 1536,
+            query="anything",
+            top_k=5,
+        )
+        assert results == []

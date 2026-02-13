@@ -150,7 +150,7 @@ class TestRetrieve:
         self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
     ):
         """Test that retrieve returns search results."""
-        mock_db.similarity_search.return_value = sample_search_results
+        mock_db.hybrid_search.return_value = sample_search_results
 
         retriever = RAGRetriever(
             db=mock_db,
@@ -165,13 +165,13 @@ class TestRetrieve:
         mock_embedding_client.generate_embedding.assert_called_once_with(
             "What does the contract say?"
         )
-        mock_db.similarity_search.assert_called_once()
+        mock_db.hybrid_search.assert_called_once()
 
     def test_retrieve_respects_top_k(
         self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
     ):
-        """Test that retrieve passes top_k to similarity search."""
-        mock_db.similarity_search.return_value = sample_search_results[:1]
+        """Test that retrieve passes top_k to hybrid search."""
+        mock_db.hybrid_search.return_value = sample_search_results[:1]
 
         retriever = RAGRetriever(
             db=mock_db,
@@ -181,13 +181,13 @@ class TestRetrieve:
 
         results = retriever.retrieve("query", top_k=1)
 
-        mock_db.similarity_search.assert_called_once()
-        call_args = mock_db.similarity_search.call_args
-        assert call_args[1]["top_k"] == 1
+        mock_db.hybrid_search.assert_called_once()
+        call_kwargs = mock_db.hybrid_search.call_args[1]
+        assert call_kwargs["top_k"] == 1
 
     def test_retrieve_empty_results(self, mock_db, mock_embedding_client, mock_anthropic):
         """Test retrieve with no matching results."""
-        mock_db.similarity_search.return_value = []
+        mock_db.hybrid_search.return_value = []
 
         retriever = RAGRetriever(
             db=mock_db,
@@ -207,7 +207,7 @@ class TestQuery:
         self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
     ):
         """Test that query returns a RAGResponse."""
-        mock_db.similarity_search.return_value = sample_search_results
+        mock_db.hybrid_search.return_value = sample_search_results
 
         retriever = RAGRetriever(
             db=mock_db,
@@ -226,7 +226,7 @@ class TestQuery:
         self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
     ):
         """Test that query builds source references correctly."""
-        mock_db.similarity_search.return_value = sample_search_results
+        mock_db.hybrid_search.return_value = sample_search_results
 
         retriever = RAGRetriever(
             db=mock_db,
@@ -244,7 +244,7 @@ class TestQuery:
 
     def test_query_no_results(self, mock_db, mock_embedding_client, mock_anthropic):
         """Test query with no matching results."""
-        mock_db.similarity_search.return_value = []
+        mock_db.hybrid_search.return_value = []
 
         retriever = RAGRetriever(
             db=mock_db,
@@ -264,7 +264,7 @@ class TestQuery:
         self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
     ):
         """Test that query calls Anthropic with properly formatted context."""
-        mock_db.similarity_search.return_value = sample_search_results
+        mock_db.hybrid_search.return_value = sample_search_results
 
         retriever = RAGRetriever(
             db=mock_db,

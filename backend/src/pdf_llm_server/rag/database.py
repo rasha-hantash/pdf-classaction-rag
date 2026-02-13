@@ -186,6 +186,132 @@ class PgVectorStore:
             )
             rows = cur.fetchall()
 
+        results = self._rows_to_search_results(rows)
+
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "similarity search completed",
+            top_k=top_k,
+            results_count=len(results),
+            duration_ms=round(duration_ms, 2),
+        )
+        return results
+
+    def _bm25_search(
+        self,
+        query: str,
+        top_k: int = 5,
+    ) -> list[SearchResult]:
+        """Full-text search using PostgreSQL ts_rank.
+
+        Args:
+            query: The raw text query to search for.
+            top_k: Number of top results to return.
+
+        Returns:
+            List of SearchResult objects sorted by ts_rank score.
+        """
+        start = time.perf_counter()
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT
+                    c.id, c.document_id, c.content, c.chunk_type, c.page_number,
+                    c.position, c.embedding, c.bbox, c.created_at,
+                    d.id as doc_id, d.file_hash, d.file_path, d.metadata, d.status, d.file_size, d.created_at as doc_created_at,
+                    ts_rank(c.search_vector, plainto_tsquery('english', %s)) as score
+                FROM chunks c
+                JOIN documents d ON c.document_id = d.id
+                WHERE c.search_vector @@ plainto_tsquery('english', %s)
+                ORDER BY score DESC
+                LIMIT %s
+                """,
+                (query, query, top_k),
+            )
+            rows = cur.fetchall()
+
+        results = self._rows_to_search_results(rows)
+
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "bm25 search completed",
+            query_length=len(query),
+            top_k=top_k,
+            results_count=len(results),
+            duration_ms=round(duration_ms, 2),
+        )
+        return results
+
+    def hybrid_search(
+        self,
+        query_embedding: list[float],
+        query: str,
+        top_k: int = 5,
+        rrf_k: int = 60,
+    ) -> list[SearchResult]:
+        """Hybrid search combining vector similarity and BM25 full-text search.
+
+        Uses Reciprocal Rank Fusion (RRF) to merge results from both retrieval
+        methods. RRF formula: score = sum(1 / (k + rank)) for each result
+        across all retrieval methods.
+
+        Args:
+            query_embedding: The embedding vector for the query.
+            query: The raw text query for full-text search.
+            top_k: Number of final results to return.
+            rrf_k: RRF smoothing constant (default 60 is standard).
+
+        Returns:
+            List of SearchResult objects sorted by fused RRF score.
+        """
+        start = time.perf_counter()
+
+        fetch_k = top_k * 3
+
+        vector_results = self.similarity_search(query_embedding, top_k=fetch_k)
+        bm25_results = self._bm25_search(query, top_k=fetch_k)
+
+        rrf_scores: dict[str, float] = {}
+        result_map: dict[str, SearchResult] = {}
+
+        for rank, result in enumerate(vector_results):
+            chunk_id = str(result.chunk.id)
+            rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0.0) + 1.0 / (rrf_k + rank + 1)
+            result_map[chunk_id] = result
+
+        for rank, result in enumerate(bm25_results):
+            chunk_id = str(result.chunk.id)
+            rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0.0) + 1.0 / (rrf_k + rank + 1)
+            if chunk_id not in result_map:
+                result_map[chunk_id] = result
+
+        sorted_ids = sorted(rrf_scores.keys(), key=lambda cid: rrf_scores[cid], reverse=True)[:top_k]
+
+        results = []
+        for chunk_id in sorted_ids:
+            original = result_map[chunk_id]
+            results.append(
+                SearchResult(
+                    chunk=original.chunk,
+                    score=rrf_scores[chunk_id],
+                    document=original.document,
+                )
+            )
+
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "hybrid search completed",
+            query_length=len(query),
+            top_k=top_k,
+            vector_candidates=len(vector_results),
+            bm25_candidates=len(bm25_results),
+            results_count=len(results),
+            duration_ms=round(duration_ms, 2),
+        )
+        return results
+
+    def _rows_to_search_results(self, rows: list[dict]) -> list[SearchResult]:
+        """Convert database rows from search queries into SearchResult objects."""
         results = []
         for row in rows:
             chunk = ChunkRecord(
@@ -209,14 +335,6 @@ class PgVectorStore:
                 created_at=row["doc_created_at"],
             )
             results.append(SearchResult(chunk=chunk, score=row["score"], document=document))
-
-        duration_ms = (time.perf_counter() - start) * 1000
-        logger.info(
-            "similarity search completed",
-            top_k=top_k,
-            results_count=len(results),
-            duration_ms=round(duration_ms, 2),
-        )
         return results
 
     def get_documents(self) -> list[IngestedDocument]:
