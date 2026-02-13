@@ -11,6 +11,7 @@ from ..logger import logger
 from .database import PgVectorStore
 from .embeddings import EmbeddingClient
 from .models import SearchResult
+from .reranker import Reranker
 
 class SourceReference(BaseModel):
     """A source reference from a retrieved chunk."""
@@ -51,6 +52,7 @@ Rules:
         anthropic_api_key: str | None = None,
         model: str = "claude-sonnet-4-20250514",
         system_prompt: str | None = None,
+        reranker: Reranker | None = None,
     ):
         """Initialize the RAG retriever.
 
@@ -60,11 +62,13 @@ Rules:
             anthropic_api_key: Anthropic API key. If not provided, uses ANTHROPIC_API_KEY env var.
             model: Claude model to use for generation.
             system_prompt: Custom system prompt for Claude. Uses default if not provided.
+            reranker: Optional Reranker instance for post-retrieval re-ranking.
         """
         self.db = db
         self.embedding_client = embedding_client
         self.model = model
         self.system_prompt = system_prompt or self.DEFAULT_SYSTEM_PROMPT
+        self.reranker = reranker
 
         api_key = anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
@@ -85,14 +89,20 @@ Rules:
         """
         start = time.perf_counter()
 
+        fetch_k = top_k * 4 if self.reranker else top_k
+
         query_embedding = self.embedding_client.generate_embedding(query)
-        results = self.db.hybrid_search(query_embedding, query, top_k=top_k)
+        results = self.db.hybrid_search(query_embedding, query, top_k=fetch_k)
+
+        if self.reranker and results:
+            results = self.reranker.rerank(query, results, top_k=top_k)
 
         duration_ms = (time.perf_counter() - start) * 1000
         logger.info(
             "retrieval completed",
             query_length=len(query),
             top_k=top_k,
+            reranked=self.reranker is not None,
             results_count=len(results),
             duration_ms=round(duration_ms, 2),
         )

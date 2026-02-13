@@ -343,3 +343,71 @@ class TestRAGResponse:
         )
         assert response.sources == []
         assert response.chunks_used == 0
+
+
+class TestRetrieveWithReranker:
+    """Tests for retrieve with reranker integration."""
+
+    def test_retrieve_with_reranker_overfetches(
+        self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
+    ):
+        """Test that reranker causes over-fetching (top_k * 4)."""
+        mock_reranker = MagicMock()
+        mock_reranker.rerank.return_value = sample_search_results[:1]
+        mock_db.hybrid_search.return_value = sample_search_results
+
+        retriever = RAGRetriever(
+            db=mock_db,
+            embedding_client=mock_embedding_client,
+            anthropic_api_key="test-key",
+            reranker=mock_reranker,
+        )
+
+        results = retriever.retrieve("query", top_k=5)
+
+        # hybrid_search should be called with fetch_k = 5 * 4 = 20
+        call_kwargs = mock_db.hybrid_search.call_args[1]
+        assert call_kwargs["top_k"] == 20
+
+        # reranker should receive all candidates and requested top_k
+        mock_reranker.rerank.assert_called_once()
+        rerank_args = mock_reranker.rerank.call_args
+        assert rerank_args[0][0] == "query"
+        assert rerank_args[1]["top_k"] == 5
+
+    def test_retrieve_without_reranker_no_overfetch(
+        self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
+    ):
+        """Test that without reranker, no over-fetching occurs."""
+        mock_db.hybrid_search.return_value = sample_search_results
+
+        retriever = RAGRetriever(
+            db=mock_db,
+            embedding_client=mock_embedding_client,
+            anthropic_api_key="test-key",
+            reranker=None,
+        )
+
+        retriever.retrieve("query", top_k=5)
+
+        call_kwargs = mock_db.hybrid_search.call_args[1]
+        assert call_kwargs["top_k"] == 5
+
+    def test_retrieve_reranker_not_called_on_empty_results(
+        self, mock_db, mock_embedding_client, mock_anthropic
+    ):
+        """Test that reranker is not called when search returns no results."""
+        mock_reranker = MagicMock()
+        mock_db.hybrid_search.return_value = []
+
+        retriever = RAGRetriever(
+            db=mock_db,
+            embedding_client=mock_embedding_client,
+            anthropic_api_key="test-key",
+            reranker=mock_reranker,
+        )
+
+        results = retriever.retrieve("query")
+
+        mock_reranker.rerank.assert_not_called()
+        assert results == []

@@ -30,6 +30,11 @@ from .retriever import (
     RAGResponse,
     SourceReference,
 )
+from .reranker import (
+    Reranker,
+    CohereReranker,
+    CrossEncoderReranker,
+)
 
 __all__ = [
     # Models
@@ -71,4 +76,8 @@ __all__ = [
     "RAGRetriever",
     "RAGResponse",
     "SourceReference",
+    # Re-ranking
+    "Reranker",
+    "CohereReranker",
+    "CrossEncoderReranker",
 ]

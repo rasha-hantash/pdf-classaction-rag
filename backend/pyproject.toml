@@ -30,6 +30,13 @@ ocr = [
 reducto = [
     "reductoai>=0.16.0",
 ]
+rerank-cohere = [
+    "cohere>=5.0.0",
+]
+rerank-local = [
+    "sentence-transformers>=3.0.0",
+    "torch>=2.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]

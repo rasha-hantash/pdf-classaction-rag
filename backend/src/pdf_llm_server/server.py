@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel, Field
@@ -21,6 +21,7 @@ from .rag import (
     RAGRetriever,
     ReductoParser,
 )
+from .rag.reranker import CohereReranker, CrossEncoderReranker
 
 # Maximum file size for uploads (50MB)
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024
@@ -81,54 +82,64 @@ class ErrorResponse(BaseModel):
     message: str
 
 
-# --- App State ---
-
-db: PgVectorStore | None = None
-_embedding_client: EmbeddingClient | None = None
-_reducto_parser: ReductoParser | None = None
-_retriever: RAGRetriever | None = None
+# --- Dependency Accessors ---
 
 
-def get_embedding_client() -> EmbeddingClient:
-    """Lazy initialization of embedding client."""
-    global _embedding_client
-    if _embedding_client is None:
-        _embedding_client = EmbeddingClient()
-    return _embedding_client
+def get_db(request: Request) -> PgVectorStore:
+    return request.app.state.db
 
 
-def get_reducto_parser() -> ReductoParser | None:
-    """Lazy initialization of Reducto parser. Returns None if not configured."""
-    global _reducto_parser
-    if _reducto_parser is None and os.getenv("PDF_PARSER", "pymupdf").lower() == "reducto":
-        _reducto_parser = ReductoParser()
-    return _reducto_parser
+def get_retriever(request: Request) -> RAGRetriever:
+    return request.app.state.retriever
 
 
-def get_retriever() -> RAGRetriever:
-    """Lazy initialization of retriever."""
-    global _retriever
-    if _retriever is None:
-        _retriever = RAGRetriever(db=db, embedding_client=get_embedding_client())
-    return _retriever
+def get_ingestion_pipeline(request: Request) -> RAGIngestionPipeline:
+    return request.app.state.ingestion_pipeline
+
+
+# --- Lifecycle ---
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifecycle."""
-    global db
-
+    """Initialize all services at startup, tear down on shutdown."""
     logger.info("starting server")
 
     PDF_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-    db = PgVectorStore()
-    db.connect()
+    app.state.db = PgVectorStore()
+    app.state.db.connect()
+
+    app.state.embedding_client = EmbeddingClient()
+
+    app.state.reducto_parser = None
+    if os.getenv("PDF_PARSER", "pymupdf").lower() == "reducto":
+        app.state.reducto_parser = ReductoParser()
+
+    app.state.reranker = None
+    reranker_type = os.getenv("RERANKER", "").lower()
+    if reranker_type == "cohere":
+        app.state.reranker = CohereReranker()
+    elif reranker_type == "cross-encoder":
+        app.state.reranker = CrossEncoderReranker()
+
+    app.state.retriever = RAGRetriever(
+        db=app.state.db,
+        embedding_client=app.state.embedding_client,
+        reranker=app.state.reranker,
+    )
+
+    app.state.ingestion_pipeline = RAGIngestionPipeline(
+        db=app.state.db,
+        embedding_client=app.state.embedding_client,
+        reducto_parser=app.state.reducto_parser,
+    )
+
+    logger.info("server ready")
 
     yield
 
-    if db:
-        db.disconnect()
+    app.state.db.disconnect()
     logger.info("server shutdown")
 
 
@@ -169,7 +180,7 @@ def health():
 
 
 @app.get("/ready", response_model=HealthResponse)
-def ready():
+def ready(db: PgVectorStore = Depends(get_db)):
     """Readiness check - verifies database connectivity."""
     checks = {"database": False}
 
@@ -189,7 +200,10 @@ def ready():
 
 
 @app.post("/api/v1/rag/ingest/batch", response_model=BatchIngestResponse)
-def ingest_batch(files: list[UploadFile] = File(...)):
+def ingest_batch(
+    files: list[UploadFile] = File(...),
+    pipeline: RAGIngestionPipeline = Depends(get_ingestion_pipeline),
+):
     """Ingest multiple PDF files via batch upload."""
     if len(files) > MAX_BATCH_SIZE:
         raise HTTPException(
@@ -248,11 +262,6 @@ def ingest_batch(files: list[UploadFile] = File(...)):
     # Phase 2: Batch ingest valid files
     try:
         if valid_tmp_paths:
-            pipeline = RAGIngestionPipeline(
-                db=db,
-                embedding_client=get_embedding_client(),
-                reducto_parser=get_reducto_parser(),
-            )
             ingest_results = pipeline.ingest_batch(
                 file_paths=valid_tmp_paths,
                 original_filenames=valid_filenames,
@@ -303,9 +312,9 @@ def ingest_batch(files: list[UploadFile] = File(...)):
 
 
 @app.post("/api/v1/rag/query", response_model=QueryResponse)
-def query(request: QueryRequest):
+def query(request: QueryRequest, retriever: RAGRetriever = Depends(get_retriever)):
     """Answer a question using RAG."""
-    response = get_retriever().query(request.question, top_k=request.top_k)
+    response = retriever.query(request.question, top_k=request.top_k)
     return QueryResponse(
         answer=response.answer,
         sources=[
@@ -337,7 +346,7 @@ class DocumentResponse(BaseModel):
 
 
 @app.get("/api/v1/documents", response_model=list[DocumentResponse])
-def list_documents():
+def list_documents(db: PgVectorStore = Depends(get_db)):
     """List all ingested documents with chunk counts."""
     with db.conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
