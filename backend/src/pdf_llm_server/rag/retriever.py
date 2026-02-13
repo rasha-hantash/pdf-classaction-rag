@@ -13,7 +13,6 @@ from .embeddings import EmbeddingClient
 from .models import SearchResult
 from .reranker import Reranker
 
-
 class SourceReference(BaseModel):
     """A source reference from a retrieved chunk."""
 
