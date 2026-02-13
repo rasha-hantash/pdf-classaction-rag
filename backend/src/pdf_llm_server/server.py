@@ -21,6 +21,7 @@ from .rag import (
     RAGRetriever,
     ReductoParser,
 )
+from .rag.reranker import CohereReranker, CrossEncoderReranker, Reranker
 
 # Maximum file size for uploads (50MB)
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024
@@ -86,6 +87,7 @@ class ErrorResponse(BaseModel):
 db: PgVectorStore | None = None
 _embedding_client: EmbeddingClient | None = None
 _reducto_parser: ReductoParser | None = None
+_reranker: Reranker | None = None
 _retriever: RAGRetriever | None = None
 
 
@@ -105,11 +107,33 @@ def get_reducto_parser() -> ReductoParser | None:
     return _reducto_parser
 
 
+def get_reranker() -> Reranker | None:
+    """Lazy initialization of reranker. Returns None if not configured.
+
+    Reads the RERANKER env var:
+        - "cohere": uses Cohere rerank API (requires COHERE_API_KEY)
+        - "cross-encoder": uses local cross-encoder model
+        - unset/empty: no reranking
+    """
+    global _reranker
+    if _reranker is None:
+        reranker_type = os.getenv("RERANKER", "").lower()
+        if reranker_type == "cohere":
+            _reranker = CohereReranker()
+        elif reranker_type == "cross-encoder":
+            _reranker = CrossEncoderReranker()
+    return _reranker
+
+
 def get_retriever() -> RAGRetriever:
     """Lazy initialization of retriever."""
     global _retriever
     if _retriever is None:
-        _retriever = RAGRetriever(db=db, embedding_client=get_embedding_client())
+        _retriever = RAGRetriever(
+            db=db,
+            embedding_client=get_embedding_client(),
+            reranker=get_reranker(),
+        )
     return _retriever
 
 
