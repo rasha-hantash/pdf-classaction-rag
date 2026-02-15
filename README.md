@@ -32,6 +32,7 @@ A retrieval-augmented generation system for querying legal documents (e.g. class
 - OpenAI API key (for embeddings)
 - Anthropic API key (for RAG responses)
 - Reducto API key (optional, for cloud PDF parsing)
+- Cohere API key (optional, for Cohere reranking)
 
 ## Setup
 
@@ -49,6 +50,16 @@ This starts PostgreSQL 16 with pgvector on port 5432.
 cd backend && uv sync
 ```
 
+To install optional dependencies for reranking:
+
+```bash
+# Cohere reranker (cloud API)
+cd backend && uv sync --extra rerank-cohere
+
+# Local cross-encoder reranker
+cd backend && uv sync --extra rerank-local
+```
+
 ### 3. Install frontend dependencies
 
 ```bash
@@ -63,6 +74,10 @@ export OPENAI_API_KEY=sk-...
 export ANTHROPIC_API_KEY=sk-ant-...
 # Optional: provide REDUCTO_API_KEY if using the reducto parser
 export REDUCTO_API_KEY=...
+# Optional: provide COHERE_API_KEY if using the Cohere reranker
+export COHERE_API_KEY=...
+# Optional: select a reranker backend ("cohere" or "cross-encoder")
+export RERANKER=cohere
 ```
 
 ## Running
@@ -77,6 +92,24 @@ Use `--pdf-parser` to select the parsing backend:
 
 ```bash
 cd backend && uv run python main.py --pdf-parser reducto
+```
+
+#### Running with Cohere reranking and Reducto parsing
+
+To use both Reducto for PDF parsing and Cohere for reranking:
+
+```bash
+export REDUCTO_API_KEY=...
+export COHERE_API_KEY=...
+export RERANKER=cohere
+cd backend && uv run python main.py --pdf-parser reducto
+```
+
+Or use the local cross-encoder reranker (no API key needed):
+
+```bash
+export RERANKER=cross-encoder
+cd backend && uv run python main.py
 ```
 
 The API runs at http://localhost:8000. Docs at http://localhost:8000/docs.
@@ -136,15 +169,24 @@ pdf-classaction-rag/
 │   │   ├── server.py                    # FastAPI REST API
 │   │   ├── logger.py                    # Structured JSON logging
 │   │   └── rag/
+│   │       ├── models.py                # Shared data models
 │   │       ├── database.py              # PgVectorStore
-│   │       ├── embeddings.py            # OpenAI embeddings
-│   │       ├── ingestion.py             # PDF ingestion pipeline
-│   │       ├── retriever.py             # RAG query with Claude
-│   │       ├── pdf_parser.py            # PyMuPDF parsing + parser dispatch
-│   │       ├── reducto_parser.py        # Reducto cloud API parser
-│   │       ├── parser_models.py         # Shared parser data models
-│   │       ├── chunking.py              # Text chunking strategies
-│   │       └── ocr.py                   # OCR detection
+│   │       ├── ingestion/               # PDF ingestion pipeline
+│   │       │   ├── pipeline.py          # RAGIngestionPipeline
+│   │       │   ├── pdf_parser.py        # PyMuPDF parsing + parser dispatch
+│   │       │   ├── reducto_parser.py    # Reducto cloud API parser
+│   │       │   ├── parser_models.py     # Shared parser data models
+│   │       │   ├── chunking.py          # Text chunking strategies
+│   │       │   └── ocr.py              # OCR detection
+│   │       ├── retrieval/               # Search and reranking
+│   │       │   ├── retriever.py         # RAGRetriever (search + rerank)
+│   │       │   └── reranker.py          # Reranker interface (Cohere, cross-encoder)
+│   │       ├── generation/              # RAG response generation
+│   │       │   └── generator.py         # RAGGenerator (context + Claude)
+│   │       └── llm_clients/             # External API client wrappers
+│   │           ├── embeddings.py        # OpenAI embeddings
+│   │           ├── anthropic_client.py  # Anthropic Claude client
+│   │           └── cohere_client.py     # Cohere rerank client
 │   └── tests/
 ├── frontend/
 │   └── src/
@@ -173,13 +215,13 @@ pdf-classaction-rag/
 - [x] React frontend with chat UI, evidence panel, and PDF page viewer
 - [x] Structured JSON logging (slog-compatible)
 - [x] Database migrations (golang-migrate)
+- [x] BM25 hybrid search with reciprocal rank fusion
+- [x] Reranking with Cohere (`rerank-v3.5`) or local cross-encoder (`ms-marco-MiniLM-L-6-v2`)
 
 ## TODO
 
 - [ ] **Rate limiting** — Add API rate limiting to protect against abuse
 - [ ] **Telemetry** — Integrate OpenTelemetry with Grafana for observability (traces, metrics, logs)
-- [ ] **Hybrid search** — Add BM25/keyword search alongside vector search for better exact-match retrieval (case numbers, dates)
-- [ ] **Reranking** — Use a cross-encoder to rerank retrieval results before sending to the LLM
 - [ ] **Chunk size tuning** — Experiment with chunk sizes based on retrieval quality metrics
 
 ## Resources
