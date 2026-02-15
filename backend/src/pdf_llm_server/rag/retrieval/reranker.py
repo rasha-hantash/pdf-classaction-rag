@@ -1,21 +1,16 @@
 """Re-ranking implementations for RAG retrieval results."""
 
-import os
 import time
 from abc import ABC, abstractmethod
-
-try:
-    import cohere
-except ImportError:
-    cohere = None
 
 try:
     from sentence_transformers import CrossEncoder
 except ImportError:
     CrossEncoder = None
 
-from ..logger import logger
-from .models import SearchResult
+from ...logger import logger
+from ..llm_clients.cohere_client import CohereClient
+from ..models import SearchResult
 
 
 class Reranker(ABC):
@@ -43,8 +38,6 @@ class Reranker(ABC):
 class CohereReranker(Reranker):
     """Re-ranks search results using Cohere's rerank API."""
 
-    DEFAULT_MODEL = "rerank-v3.5"
-
     def __init__(
         self,
         api_key: str | None = None,
@@ -57,20 +50,10 @@ class CohereReranker(Reranker):
             model: Cohere rerank model name. Defaults to rerank-v3.5.
 
         Raises:
+            ImportError: If the cohere package is not installed.
             ValueError: If no API key is available.
         """
-        if cohere is None:
-            raise ImportError(
-                "cohere is required for CohereReranker. "
-                "Install it with: pip install pdf-classaction-rag[rerank-cohere]"
-            )
-        api_key = api_key or os.getenv("COHERE_API_KEY")
-        if not api_key:
-            raise ValueError(
-                "Cohere API key required: provide api_key or set COHERE_API_KEY"
-            )
-        self._client = cohere.ClientV2(api_key=api_key)
-        self._model = model or self.DEFAULT_MODEL
+        self._client = CohereClient(api_key=api_key, model=model)
 
     def rerank(
         self,
@@ -85,12 +68,7 @@ class CohereReranker(Reranker):
 
         documents = [r.chunk.content for r in results]
 
-        response = self._client.rerank(
-            model=self._model,
-            query=query,
-            documents=documents,
-            top_n=top_k,
-        )
+        response = self._client.rerank(query, documents, top_n=top_k)
 
         reranked = []
         for item in response.results:
@@ -110,7 +88,7 @@ class CohereReranker(Reranker):
             candidates=len(results),
             top_k=top_k,
             results_count=len(reranked),
-            model=self._model,
+            model=self._client.model,
             duration_ms=round(duration_ms, 2),
         )
 

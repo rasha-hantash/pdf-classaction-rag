@@ -1,17 +1,19 @@
-from .models import IngestedDocument, ChunkRecord, SearchResult
+from .models import ChunkData, IngestedDocument, ChunkRecord, SearchResult
 from .database import PgVectorStore
-from .parser_models import ParsedDocument, ParsedPage, TextBlock, TableData
-from .pdf_parser import parse_pdf, parse_pdf_pymupdf
-from .reducto_parser import ReductoParser
-from .chunking import (
+from .ingestion import (
+    ParsedDocument,
+    ParsedPage,
+    TextBlock,
+    TableData,
+    parse_pdf,
+    parse_pdf_pymupdf,
+    ReductoParser,
     fixed_size_chunking,
     semantic_chunking_by_paragraphs,
     chunk_parsed_document,
     detect_content_type,
-    ChunkData,
-)
-from .ocr import assess_needs_ocr, ocr_pdf_with_tesseract
-from .ingestion import (
+    assess_needs_ocr,
+    ocr_pdf_with_tesseract,
     RAGIngestionPipeline,
     ingest_document,
     compute_file_hash,
@@ -19,21 +21,24 @@ from .ingestion import (
     IngestResult,
     PathValidationError,
 )
-from .embeddings import (
+from .llm_clients import (
     EmbeddingClient,
     EmbeddingResult,
     generate_embedding,
     generate_embeddings,
+    AnthropicClient,
+    CohereClient,
 )
-from .retriever import (
+from .retrieval import (
     RAGRetriever,
-    RAGResponse,
-    SourceReference,
-)
-from .reranker import (
     Reranker,
     CohereReranker,
     CrossEncoderReranker,
+)
+from .generation import (
+    RAGGenerator,
+    RAGResponse,
+    SourceReference,
 )
 
 __all__ = [
@@ -72,8 +77,13 @@ __all__ = [
     "EmbeddingResult",
     "generate_embedding",
     "generate_embeddings",
+    # LLM Clients
+    "AnthropicClient",
+    "CohereClient",
     # Retriever
     "RAGRetriever",
+    # Generation
+    "RAGGenerator",
     "RAGResponse",
     "SourceReference",
     # Re-ranking

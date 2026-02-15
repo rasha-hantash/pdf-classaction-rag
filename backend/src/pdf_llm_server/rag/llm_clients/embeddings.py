@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import tiktoken
 from openai import OpenAI, RateLimitError, APIStatusError
 
-from ..logger import logger
+from ...logger import logger
 
 # Constants
 MODEL = "text-embedding-3-small"

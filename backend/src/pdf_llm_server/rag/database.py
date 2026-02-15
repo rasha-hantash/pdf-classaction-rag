@@ -8,8 +8,7 @@ from pgvector.psycopg2 import register_vector
 from psycopg2.extras import Json, RealDictCursor, execute_values
 
 from ..logger import logger
-from .chunking import ChunkData
-from .models import ChunkRecord, IngestedDocument, SearchResult
+from .models import ChunkData, ChunkRecord, IngestedDocument, SearchResult
 
 
 class PgVectorStore:

@@ -7,11 +7,11 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from ..logger import clear_context, logger, set_context
+from ...logger import clear_context, logger, set_context
 from .chunking import ChunkData, chunk_parsed_document
-from .database import PgVectorStore
-from .embeddings import EmbeddingClient
-from .models import ChunkRecord, IngestedDocument
+from ..database import PgVectorStore
+from ..llm_clients.embeddings import EmbeddingClient
+from ..models import ChunkRecord, IngestedDocument
 from .pdf_parser import parse_pdf
 from .reducto_parser import ReductoParser
 

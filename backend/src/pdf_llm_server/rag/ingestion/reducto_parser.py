@@ -5,9 +5,12 @@ import time
 from html.parser import HTMLParser
 from pathlib import Path
 
-from reducto.reducto import Reducto
+try:
+    from reducto.reducto import Reducto
+except ImportError:
+    Reducto = None
 
-from ..logger import logger
+from ...logger import logger
 from .parser_models import ParsedDocument, ParsedPage, TableData, TextBlock
 
 
@@ -111,6 +114,11 @@ class ReductoParser:
     """
 
     def __init__(self, api_key: str | None = None):
+        if Reducto is None:
+            raise ImportError(
+                "reductoai package is required for ReductoParser. "
+                "Install it with: pip install 'reductoai>=0.16.0'"
+            )
         api_key = api_key or os.getenv("REDUCTO_API_KEY")
         if not api_key:
             raise ValueError(

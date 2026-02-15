@@ -1,19 +1,20 @@
-"""Tests for the RAG retriever."""
+"""Tests for the RAG retriever and generator."""
 
-import os
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 
 from pdf_llm_server.rag import (
     RAGRetriever,
+    RAGGenerator,
     RAGResponse,
     SourceReference,
     SearchResult,
     ChunkRecord,
     IngestedDocument,
+    AnthropicClient,
 )
 
 
@@ -33,15 +34,11 @@ def mock_embedding_client():
 
 
 @pytest.fixture
-def mock_anthropic():
-    """Create a mock Anthropic client."""
-    with patch("pdf_llm_server.rag.retriever.Anthropic") as mock_cls:
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="This is a test answer based on the context.")]
-        mock_client.messages.create.return_value = mock_response
-        mock_cls.return_value = mock_client
-        yield mock_client
+def mock_anthropic_client():
+    """Create a mock AnthropicClient."""
+    client = MagicMock(spec=AnthropicClient)
+    client.create_message.return_value = "This is a test answer based on the context."
+    return client
 
 
 @pytest.fixture
@@ -90,64 +87,32 @@ def sample_search_results():
 class TestRAGRetrieverInit:
     """Tests for RAGRetriever initialization."""
 
-    def test_init_with_api_key(self, mock_db, mock_embedding_client, mock_anthropic):
-        """Test initialization with explicit API key."""
+    def test_init(self, mock_db, mock_embedding_client):
+        """Test initialization with required args."""
         retriever = RAGRetriever(
             db=mock_db,
             embedding_client=mock_embedding_client,
-            anthropic_api_key="test-key",
         )
         assert retriever.db == mock_db
         assert retriever.embedding_client == mock_embedding_client
-        assert retriever.model == "claude-sonnet-4-20250514"
+        assert retriever.reranker is None
 
-    def test_init_from_env(self, mock_db, mock_embedding_client, mock_anthropic):
-        """Test initialization with API key from environment."""
-        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "env-key"}):
-            retriever = RAGRetriever(
-                db=mock_db,
-                embedding_client=mock_embedding_client,
-            )
-            assert retriever.db == mock_db
-
-    def test_init_no_key_raises(self, mock_db, mock_embedding_client):
-        """Test that missing API key raises ValueError."""
-        with patch.dict(os.environ, {}, clear=True):
-            # Remove ANTHROPIC_API_KEY if it exists
-            os.environ.pop("ANTHROPIC_API_KEY", None)
-            with pytest.raises(ValueError, match="Anthropic API key required"):
-                RAGRetriever(
-                    db=mock_db,
-                    embedding_client=mock_embedding_client,
-                )
-
-    def test_init_custom_model(self, mock_db, mock_embedding_client, mock_anthropic):
-        """Test initialization with custom model."""
+    def test_init_with_reranker(self, mock_db, mock_embedding_client):
+        """Test initialization with a reranker."""
+        mock_reranker = MagicMock()
         retriever = RAGRetriever(
             db=mock_db,
             embedding_client=mock_embedding_client,
-            anthropic_api_key="test-key",
-            model="claude-opus-4-20250514",
+            reranker=mock_reranker,
         )
-        assert retriever.model == "claude-opus-4-20250514"
-
-    def test_init_custom_system_prompt(self, mock_db, mock_embedding_client, mock_anthropic):
-        """Test initialization with custom system prompt."""
-        custom_prompt = "You are a legal assistant."
-        retriever = RAGRetriever(
-            db=mock_db,
-            embedding_client=mock_embedding_client,
-            anthropic_api_key="test-key",
-            system_prompt=custom_prompt,
-        )
-        assert retriever.system_prompt == custom_prompt
+        assert retriever.reranker == mock_reranker
 
 
 class TestRetrieve:
     """Tests for the retrieve method."""
 
     def test_retrieve_returns_results(
-        self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
+        self, mock_db, mock_embedding_client, sample_search_results
     ):
         """Test that retrieve returns search results."""
         mock_db.hybrid_search.return_value = sample_search_results
@@ -155,7 +120,6 @@ class TestRetrieve:
         retriever = RAGRetriever(
             db=mock_db,
             embedding_client=mock_embedding_client,
-            anthropic_api_key="test-key",
         )
 
         results = retriever.retrieve("What does the contract say?", top_k=5)
@@ -168,7 +132,7 @@ class TestRetrieve:
         mock_db.hybrid_search.assert_called_once()
 
     def test_retrieve_respects_top_k(
-        self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
+        self, mock_db, mock_embedding_client, sample_search_results
     ):
         """Test that retrieve passes top_k to hybrid search."""
         mock_db.hybrid_search.return_value = sample_search_results[:1]
@@ -176,7 +140,6 @@ class TestRetrieve:
         retriever = RAGRetriever(
             db=mock_db,
             embedding_client=mock_embedding_client,
-            anthropic_api_key="test-key",
         )
 
         results = retriever.retrieve("query", top_k=1)
@@ -185,14 +148,13 @@ class TestRetrieve:
         call_kwargs = mock_db.hybrid_search.call_args[1]
         assert call_kwargs["top_k"] == 1
 
-    def test_retrieve_empty_results(self, mock_db, mock_embedding_client, mock_anthropic):
+    def test_retrieve_empty_results(self, mock_db, mock_embedding_client):
         """Test retrieve with no matching results."""
         mock_db.hybrid_search.return_value = []
 
         retriever = RAGRetriever(
             db=mock_db,
             embedding_client=mock_embedding_client,
-            anthropic_api_key="test-key",
         )
 
         results = retriever.retrieve("nonexistent topic")
@@ -200,41 +162,48 @@ class TestRetrieve:
         assert results == []
 
 
-class TestQuery:
-    """Tests for the query method."""
+class TestRAGGeneratorInit:
+    """Tests for RAGGenerator initialization."""
 
-    def test_query_returns_rag_response(
-        self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
-    ):
-        """Test that query returns a RAGResponse."""
-        mock_db.hybrid_search.return_value = sample_search_results
+    def test_init(self, mock_anthropic_client):
+        """Test initialization with AnthropicClient."""
+        generator = RAGGenerator(anthropic_client=mock_anthropic_client)
+        assert generator.anthropic_client == mock_anthropic_client
+        assert generator.system_prompt == RAGGenerator.DEFAULT_SYSTEM_PROMPT
 
-        retriever = RAGRetriever(
-            db=mock_db,
-            embedding_client=mock_embedding_client,
-            anthropic_api_key="test-key",
+    def test_init_custom_system_prompt(self, mock_anthropic_client):
+        """Test initialization with custom system prompt."""
+        custom_prompt = "You are a legal assistant."
+        generator = RAGGenerator(
+            anthropic_client=mock_anthropic_client,
+            system_prompt=custom_prompt,
         )
+        assert generator.system_prompt == custom_prompt
 
-        response = retriever.query("What does the contract say?")
+
+class TestGenerate:
+    """Tests for the generate method."""
+
+    def test_generate_returns_rag_response(
+        self, mock_anthropic_client, sample_search_results
+    ):
+        """Test that generate returns a RAGResponse."""
+        generator = RAGGenerator(anthropic_client=mock_anthropic_client)
+
+        response = generator.generate("What does the contract say?", sample_search_results)
 
         assert isinstance(response, RAGResponse)
         assert response.answer == "This is a test answer based on the context."
         assert response.chunks_used == 2
         assert len(response.sources) == 2
 
-    def test_query_builds_sources(
-        self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
+    def test_generate_builds_sources(
+        self, mock_anthropic_client, sample_search_results
     ):
-        """Test that query builds source references correctly."""
-        mock_db.hybrid_search.return_value = sample_search_results
+        """Test that generate builds source references correctly."""
+        generator = RAGGenerator(anthropic_client=mock_anthropic_client)
 
-        retriever = RAGRetriever(
-            db=mock_db,
-            embedding_client=mock_embedding_client,
-            anthropic_api_key="test-key",
-        )
-
-        response = retriever.query("question")
+        response = generator.generate("question", sample_search_results)
 
         assert len(response.sources) == 2
         assert response.sources[0].file_path == "/docs/contract.pdf"
@@ -242,49 +211,34 @@ class TestQuery:
         assert response.sources[1].file_path == "/docs/report.pdf"
         assert response.sources[1].page_number == 12
 
-    def test_query_no_results(self, mock_db, mock_embedding_client, mock_anthropic):
-        """Test query with no matching results."""
-        mock_db.hybrid_search.return_value = []
+    def test_generate_no_results(self, mock_anthropic_client):
+        """Test generate with no matching results."""
+        generator = RAGGenerator(anthropic_client=mock_anthropic_client)
 
-        retriever = RAGRetriever(
-            db=mock_db,
-            embedding_client=mock_embedding_client,
-            anthropic_api_key="test-key",
-        )
-
-        response = retriever.query("nonexistent topic")
+        response = generator.generate("nonexistent topic", [])
 
         assert "couldn't find" in response.answer.lower()
         assert response.chunks_used == 0
         assert response.sources == []
         # Should not call Anthropic when no results
-        mock_anthropic.messages.create.assert_not_called()
+        mock_anthropic_client.create_message.assert_not_called()
 
-    def test_query_calls_anthropic_with_context(
-        self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
+    def test_generate_calls_anthropic_with_context(
+        self, mock_anthropic_client, sample_search_results
     ):
-        """Test that query calls Anthropic with properly formatted context."""
-        mock_db.hybrid_search.return_value = sample_search_results
+        """Test that generate calls AnthropicClient with properly formatted context."""
+        generator = RAGGenerator(anthropic_client=mock_anthropic_client)
 
-        retriever = RAGRetriever(
-            db=mock_db,
-            embedding_client=mock_embedding_client,
-            anthropic_api_key="test-key",
-        )
+        generator.generate("What does the contract say?", sample_search_results)
 
-        retriever.query("What does the contract say?")
+        mock_anthropic_client.create_message.assert_called_once()
+        call_kwargs = mock_anthropic_client.create_message.call_args[1]
 
-        mock_anthropic.messages.create.assert_called_once()
-        call_kwargs = mock_anthropic.messages.create.call_args[1]
-
-        assert call_kwargs["model"] == "claude-sonnet-4-20250514"
-        assert call_kwargs["max_tokens"] == 2048
         assert "system" in call_kwargs
-        assert len(call_kwargs["messages"]) == 1
-        assert call_kwargs["messages"][0]["role"] == "user"
+        assert "user_message" in call_kwargs
 
         # Check that context contains the chunk content
-        user_content = call_kwargs["messages"][0]["content"]
+        user_content = call_kwargs["user_message"]
         assert "contract states" in user_content
         assert "quarterly report" in user_content
 
@@ -297,6 +251,7 @@ class TestSourceReference:
         source = SourceReference(
             file_path="/path/to/doc.pdf",
             page_number=5,
+            content="Full content here",
             content_preview="This is a preview...",
         )
         assert source.file_path == "/path/to/doc.pdf"
@@ -308,6 +263,7 @@ class TestSourceReference:
         source = SourceReference(
             file_path="/path/to/doc.pdf",
             page_number=None,
+            content="Content",
             content_preview="Preview text",
         )
         assert source.page_number is None
@@ -322,6 +278,7 @@ class TestRAGResponse:
             SourceReference(
                 file_path="/doc.pdf",
                 page_number=1,
+                content="content",
                 content_preview="preview",
             )
         ]
@@ -349,7 +306,7 @@ class TestRetrieveWithReranker:
     """Tests for retrieve with reranker integration."""
 
     def test_retrieve_with_reranker_overfetches(
-        self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
+        self, mock_db, mock_embedding_client, sample_search_results
     ):
         """Test that reranker causes over-fetching (top_k * 4)."""
         mock_reranker = MagicMock()
@@ -359,7 +316,6 @@ class TestRetrieveWithReranker:
         retriever = RAGRetriever(
             db=mock_db,
             embedding_client=mock_embedding_client,
-            anthropic_api_key="test-key",
             reranker=mock_reranker,
         )
 
@@ -376,7 +332,7 @@ class TestRetrieveWithReranker:
         assert rerank_args[1]["top_k"] == 5
 
     def test_retrieve_without_reranker_no_overfetch(
-        self, mock_db, mock_embedding_client, mock_anthropic, sample_search_results
+        self, mock_db, mock_embedding_client, sample_search_results
     ):
         """Test that without reranker, no over-fetching occurs."""
         mock_db.hybrid_search.return_value = sample_search_results
@@ -384,7 +340,6 @@ class TestRetrieveWithReranker:
         retriever = RAGRetriever(
             db=mock_db,
             embedding_client=mock_embedding_client,
-            anthropic_api_key="test-key",
             reranker=None,
         )
 
@@ -394,7 +349,7 @@ class TestRetrieveWithReranker:
         assert call_kwargs["top_k"] == 5
 
     def test_retrieve_reranker_not_called_on_empty_results(
-        self, mock_db, mock_embedding_client, mock_anthropic
+        self, mock_db, mock_embedding_client
     ):
         """Test that reranker is not called when search returns no results."""
         mock_reranker = MagicMock()
@@ -403,7 +358,6 @@ class TestRetrieveWithReranker:
         retriever = RAGRetriever(
             db=mock_db,
             embedding_client=mock_embedding_client,
-            anthropic_api_key="test-key",
             reranker=mock_reranker,
         )
 

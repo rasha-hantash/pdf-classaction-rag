@@ -6,7 +6,7 @@ import fitz  # PyMuPDF
 import pytesseract
 from PIL import Image
 
-from ..logger import logger
+from ...logger import logger
 
 # Threshold: pages with fewer average chars are considered scanned
 SCANNED_CHARS_THRESHOLD = 50

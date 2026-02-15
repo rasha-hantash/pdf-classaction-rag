@@ -14,14 +14,17 @@ from pydantic import BaseModel, Field
 
 from .logger import logger
 from .rag import (
+    AnthropicClient,
+    CohereReranker,
+    CrossEncoderReranker,
     EmbeddingClient,
     PathValidationError,
     PgVectorStore,
+    RAGGenerator,
     RAGIngestionPipeline,
     RAGRetriever,
     ReductoParser,
 )
-from .rag.reranker import CohereReranker, CrossEncoderReranker
 
 # Maximum file size for uploads (50MB)
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024
@@ -93,6 +96,10 @@ def get_retriever(request: Request) -> RAGRetriever:
     return request.app.state.retriever
 
 
+def get_generator(request: Request) -> RAGGenerator:
+    return request.app.state.generator
+
+
 def get_ingestion_pipeline(request: Request) -> RAGIngestionPipeline:
     return request.app.state.ingestion_pipeline
 
@@ -128,6 +135,9 @@ async def lifespan(app: FastAPI):
         embedding_client=app.state.embedding_client,
         reranker=app.state.reranker,
     )
+
+    anthropic_client = AnthropicClient()
+    app.state.generator = RAGGenerator(anthropic_client=anthropic_client)
 
     app.state.ingestion_pipeline = RAGIngestionPipeline(
         db=app.state.db,
@@ -312,9 +322,14 @@ def ingest_batch(
 
 
 @app.post("/api/v1/rag/query", response_model=QueryResponse)
-def query(request: QueryRequest, retriever: RAGRetriever = Depends(get_retriever)):
+def query(
+    request: QueryRequest,
+    retriever: RAGRetriever = Depends(get_retriever),
+    generator: RAGGenerator = Depends(get_generator),
+):
     """Answer a question using RAG."""
-    response = retriever.query(request.question, top_k=request.top_k)
+    results = retriever.retrieve(request.question, top_k=request.top_k)
+    response = generator.generate(request.question, results)
     return QueryResponse(
         answer=response.answer,
         sources=[

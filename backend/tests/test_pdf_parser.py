@@ -5,7 +5,7 @@ from pathlib import Path
 import fitz  # PyMuPDF
 import pytest
 
-from pdf_llm_server.rag.pdf_parser import (
+from pdf_llm_server.rag.ingestion.pdf_parser import (
     ParsedDocument,
     ParsedPage,
     TextBlock,

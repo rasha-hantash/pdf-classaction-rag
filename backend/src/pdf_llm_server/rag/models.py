@@ -33,6 +33,17 @@ class ChunkRecord(BaseModel):
         return v
 
 
+class ChunkData(BaseModel):
+    """A chunk of content ready for embedding."""
+
+    content: str
+    chunk_type: str
+    page_number: int
+    position: int
+    bbox: list[float] | None = None
+    embedding: list[float] | None = None
+
+
 class SearchResult(BaseModel):
     chunk: ChunkRecord
     score: float

@@ -2,20 +2,8 @@
 
 import re
 
-from pydantic import BaseModel
-
+from ..models import ChunkData
 from .parser_models import ParsedDocument
-
-
-class ChunkData(BaseModel):
-    """A chunk of content ready for embedding."""
-
-    content: str
-    chunk_type: str
-    page_number: int
-    position: int
-    bbox: list[float] | None = None
-    embedding: list[float] | None = None
 
 
 def fixed_size_chunking(

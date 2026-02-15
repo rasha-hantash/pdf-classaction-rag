@@ -2,7 +2,7 @@
 
 import pytest
 
-from pdf_llm_server.rag.chunking import (
+from pdf_llm_server.rag.ingestion.chunking import (
     ChunkData,
     detect_content_type,
     fixed_size_chunking,

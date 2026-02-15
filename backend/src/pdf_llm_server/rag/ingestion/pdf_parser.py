@@ -6,7 +6,7 @@ from pathlib import Path
 
 import fitz  # PyMuPDF
 
-from ..logger import logger
+from ...logger import logger
 from .ocr import assess_needs_ocr, ocr_page
 from .parser_models import ParsedDocument, ParsedPage, TableData, TextBlock
 from .reducto_parser import ReductoParser
