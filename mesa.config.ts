@@ -141,6 +141,48 @@ export default {
           "psycopg2 connections are not thread-safe — each ThreadPoolExecutor worker needs its own connection",
         ],
       },
+      {
+        name: "performance",
+        model: "high-reasoning",
+        context: "full-codebase",
+        fileMatch: [
+          "backend/src/**/*.py",
+          "frontend/src/**/*.ts",
+          "frontend/src/**/*.tsx",
+        ],
+        rules: [
+          // Backend: query patterns
+          "Flag N+1 queries — querying inside a loop instead of batching with execute_values() or a single JOIN",
+          "Flag unbatched inserts — inserting rows one-by-one instead of using execute_values()",
+          "Flag SELECT without LIMIT on tables that can grow (documents, chunks, embeddings)",
+          "Flag waterfall await calls to independent services — use asyncio.gather() for parallel requests",
+
+          // Backend: resource management
+          "Flag DB connections or file handles held open across network I/O or external API calls",
+          "Flag blocking synchronous I/O in async handlers without run_in_executor",
+          "Flag shared psycopg2 connections across ThreadPoolExecutor workers",
+
+          // Backend: algorithmic
+          "Flag O(n^2) patterns — nested loops over growing collections, repeated 'in' checks on lists instead of sets",
+          "Flag unbounded caches without eviction — suggest lru_cache, WeakValueDictionary, or TTL",
+          "Flag loading entire PDFs into memory without streaming or chunking",
+
+          // Frontend: React rendering
+          "Flag inline object/array/function literals in JSX props that cause unnecessary re-renders",
+          "Flag missing React.memo on components that receive stable props but re-render due to parent",
+          "Flag expensive computations in render body without useMemo",
+          "Flag unstable callback references in props without useCallback",
+
+          // Frontend: state management
+          "Flag derived state stored in useState — should be a computed variable or useMemo",
+          "Flag duplicated state — same data stored in multiple places that can get out of sync",
+
+          // Frontend: loading
+          "Flag large components/routes imported eagerly that should use React.lazy() and code splitting",
+          "Flag rendering large lists (>100 items) without virtualization/windowing",
+          "Flag missing abort controllers on fetch calls in useEffect",
+        ],
+      },
     ],
     triggers: ["pull_request"],
   },
