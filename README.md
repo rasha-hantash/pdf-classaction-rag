@@ -124,13 +124,13 @@ The UI runs at http://localhost:3000 and proxies API requests to the backend.
 
 ## API Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Liveness check |
-| GET | `/ready` | Readiness check (DB connectivity) |
-| POST | `/api/v1/rag/ingest/batch` | Upload and ingest PDF files |
-| POST | `/api/v1/rag/query` | Ask a question using RAG |
-| GET | `/api/v1/rag/documents` | List ingested documents |
+| Method | Endpoint                   | Description                       |
+| ------ | -------------------------- | --------------------------------- |
+| GET    | `/health`                  | Liveness check                    |
+| GET    | `/ready`                   | Readiness check (DB connectivity) |
+| POST   | `/api/v1/rag/ingest/batch` | Upload and ingest PDF files       |
+| POST   | `/api/v1/rag/query`        | Ask a question using RAG          |
+| GET    | `/api/v1/rag/documents`    | List ingested documents           |
 
 ## Usage Examples
 
