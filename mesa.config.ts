@@ -8,9 +8,14 @@ export default {
         fileMatch: [
           "backend/src/**/*.py",
           "backend/tests/**/*.py",
+          "backend/scripts/**/*.py",
           "backend/main.py",
         ],
         rules: [
+          // CLI input validation
+          "Validate numeric CLI arguments beyond argparse type checks — reject zero and negative values with parser.error()",
+          "Use 'is not None' for optional numeric arguments — never use truthiness (0 is falsy, gets silently skipped)",
+
           // psycopg2 transaction safety
           "Every method calling conn.commit() must have a matching conn.rollback() in an except block",
           "Use execute_values() for batch inserts — never insert rows in a loop",
@@ -83,6 +88,7 @@ export default {
         context: "full-codebase",
         fileMatch: [
           "backend/src/**/*.py",
+          "backend/scripts/**/*.py",
           "frontend/src/lib/api.ts",
           "docker-compose.yaml",
           "backend/migrations/**/*.sql",
@@ -94,6 +100,14 @@ export default {
           // File handling
           "Validate file paths against path traversal (../ sequences, symlink escapes)",
           "File uploads must validate both type and size on disk after saving",
+          "Resolve file paths with .resolve() before read/write operations in functions that accept path arguments",
+          "Check file size with path.stat().st_size before reading files into memory — guard against memory exhaustion from large files",
+
+          // HTML generation (applies to any code that builds HTML strings)
+          "HTML-escape all user-controlled or external strings interpolated into generated HTML — filenames, PDF text, API responses, database content",
+          "Escape </ sequences in JSON embedded in <script> tags to prevent script tag breakout — use json.dumps(...).replace('</','<\\/')",
+          "Use DOM APIs (createElement + textContent) instead of innerHTML when building elements from user input in generated JS",
+          "Quote and escape all values injected into HTML attributes",
 
           // Secrets
           "No hardcoded secrets, API keys, or credentials in source code",
