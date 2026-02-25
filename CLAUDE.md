@@ -194,6 +194,7 @@ def process_batch(items: list[Item]) -> list[BatchResult]:
 ```
 
 This allows callers to:
+
 1. Know exactly which items failed and why
 2. Retry only failed items
 3. Generate accurate success/failure reports
@@ -242,6 +243,7 @@ def ingest_batch(self, file_paths: list[Path], max_workers: int = 4) -> list[Ing
 ```
 
 **Important:** When using parallel processing with database connections:
+
 - psycopg2 connections are NOT thread-safe
 - Each worker thread must create its own connection
 - Store the connection string (not the connection) in the class
@@ -283,7 +285,13 @@ Use the structured JSON logger for all log output. This matches the Go slog form
 ### Output Format
 
 ```json
-{"time":"2026-02-03T14:06:20.829529-05:00","level":"INFO","source":{"function":"connect","file":"database.py","line":25},"msg":"connected to database","duration_ms":12.34}
+{
+  "time": "2026-02-03T14:06:20.829529-05:00",
+  "level": "INFO",
+  "source": { "function": "connect", "file": "database.py", "line": 25 },
+  "msg": "connected to database",
+  "duration_ms": 12.34
+}
 ```
 
 ### Basic Usage
@@ -443,6 +451,37 @@ frontend/src/
 - Keep all shared types in `lib/types.ts` — do NOT create a separate `types/` directory
 - Do NOT create barrel exports for `lib/`
 - API wrappers go in `lib/api.ts`
+
+## Extraction Evaluation Tools
+
+The `backend/scripts/eval/` package contains tools for measuring PDF extraction quality. See `backend/scripts/eval/README.md` for full documentation.
+
+### Quick reference
+
+```bash
+# Generate an interactive HTML report for a PDF
+cd backend && uv run python scripts/generate_report.py <pdf_path>
+
+# Compare both parsers side-by-side
+cd backend && uv run python scripts/generate_report.py <pdf_path> --compare
+
+# Score extraction against ground truth annotations
+cd backend && uv run python scripts/score_extraction.py <pdf_path> <ground_truth.json>
+
+# Score with a different parser than the ground truth was annotated against
+cd backend && uv run python scripts/score_extraction.py <pdf_path> <ground_truth.json> --parser reducto
+```
+
+### Ground truth schema
+
+Ground truth JSON files follow the `GroundTruth` Pydantic model in `backend/scripts/eval/ground_truth.py`. Key types: `BlockVerdict` (per-block annotation with verdict + optional correction), `MissingBlock` (content the parser missed), `PageAnnotation` (per-page container), `GroundTruth` (top-level document).
+
+### Bbox coordinate spaces
+
+- **PyMuPDF**: absolute PDF points — multiply by `dpi / 72` to get pixels
+- **Reducto**: normalized 0-1 — multiply by page dimensions (in points) then by `dpi / 72`
+
+The report renderer auto-detects the coordinate space based on the parser name.
 
 ## Code Review (Mesa)
 
