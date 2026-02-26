@@ -483,6 +483,32 @@ Ground truth JSON files follow the `GroundTruth` Pydantic model in `backend/scri
 
 The report renderer auto-detects the coordinate space based on the parser name.
 
+## Frontend Testing (Playwright + Claude-in-Chrome)
+
+Use Playwright for all actual frontend tests. Tests live in `frontend/e2e/` and run via `npm run test:e2e` (headless) or `npm run test:e2e:ui` (interactive UI mode).
+
+### Division of responsibility
+
+- **Playwright** owns the test suite — deterministic, headless, runs in CI, has proper assertions. Every user-facing flow should have a Playwright test.
+- **Claude-in-Chrome** is the development-time assistant — use it to look at pages, help write Playwright tests, and debug when things go wrong. It's the pair programmer who can see the screen, not the test runner.
+
+### When to use which
+
+| Task                                            | Tool                                                     |
+| ----------------------------------------------- | -------------------------------------------------------- |
+| Regression tests, CI checks                     | Playwright                                               |
+| "Does this page look right?" during development | Claude-in-Chrome                                         |
+| Writing new Playwright tests                    | Claude-in-Chrome (look at the page, then write the test) |
+| Debugging a failing Playwright test             | Claude-in-Chrome (reproduce visually, diagnose)          |
+| Responsive design spot-checks                   | Claude-in-Chrome (resize + screenshot)                   |
+
+### Conventions
+
+- Test files go in `frontend/e2e/` with the `.spec.ts` extension
+- Use `page.getByRole()`, `page.getByText()`, and `page.getByTestId()` selectors — avoid CSS selectors
+- Playwright config is at `frontend/playwright.config.ts` — tests run against `localhost:3000` with the dev server auto-started
+- Only Chromium is configured by default — add Firefox/WebKit projects when cross-browser testing is needed
+
 ## Code Review (Mesa)
 
 [Mesa](https://mesa.dev) is an AI-powered code review platform that runs automated review agents on pull requests. It provides senior-level reviews with full codebase context and customizable standards.
