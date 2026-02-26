@@ -1,169 +1,411 @@
 {
   "name": "classaction-v1",
-  "description": "Seed evaluation dataset for class action settlement PDFs. Questions cover settlement details, eligibility, parties, deadlines, claim calculation, and table-based data.",
-  "pdf_corpus": [],
+  "description": "Evaluation dataset for the Facebook/Meta Consumer Privacy class action settlement (Case No. 3:18-MD-02843-VC). Questions and gold passages drawn from 3 court documents: Final Approval Order, Plan of Allocation, and Claim Form.",
+  "pdf_corpus": [
+    "/Users/rashasaadeh/workspace/personal/pdf-classaction-rag/backend/data/pdfs/149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+    "/Users/rashasaadeh/workspace/personal/pdf-classaction-rag/backend/data/pdfs/ee7eb233-d7a6-4631-a6ee-2422c9cbbd33.pdf",
+    "/Users/rashasaadeh/workspace/personal/pdf-classaction-rag/backend/data/pdfs/5f07e256-973d-4acb-bd05-dbfa0a246748.pdf"
+  ],
   "questions": [
     {
       "question": "What is the total settlement amount?",
-      "gold_passages": [],
+      "gold_passages": [
+        {
+          "text": "The $725 million Settlement provides substantial benefits for the Class in light of the strengths and weaknesses of the claims asserted.",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 5
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "The total settlement amount is $725 million.",
+        "key_facts": ["$725 million"]
       },
       "category": "settlement"
     },
     {
-      "question": "How much is the settlement fund?",
-      "gold_passages": [],
+      "question": "Is the settlement fund reversionary?",
+      "gold_passages": [
+        {
+          "text": "This is a common fund settlement; there shall be no reversion of the Settlement Fund to Meta upon the occurrence of the Effective Date.",
+          "source_pdf": "ee7eb233-d7a6-4631-a6ee-2422c9cbbd33.pdf",
+          "page_number": 3
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "No, this is a nonreversionary common fund settlement. There shall be no reversion of the Settlement Fund to Meta upon the occurrence of the Effective Date.",
+        "key_facts": ["nonreversionary", "common fund", "no reversion to Meta"]
       },
       "category": "settlement"
     },
     {
-      "question": "What are the terms of the settlement agreement?",
-      "gold_passages": [],
+      "question": "Was the settlement reached through mediation?",
+      "gold_passages": [
+        {
+          "text": "the Court is aware, based on communications with mediator Jay Gandhi, that his involvement was critical in brokering a fair settlement. In addition, District Judge Jacqueline Scott Corley, who previously presided over discovery disputes in this matter, was involved in brokering the settlement.",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 5
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "Yes, the settlement was reached through mediation with mediator Jay Gandhi and District Judge Jacqueline Scott Corley.",
+        "key_facts": ["Jay Gandhi", "Jacqueline Scott Corley", "mediation"]
       },
       "category": "settlement"
     },
     {
-      "question": "Who is eligible to participate in this class action?",
-      "gold_passages": [],
+      "question": "Who is eligible for this class action settlement?",
+      "gold_passages": [
+        {
+          "text": "All Facebook users in the United States between May 24, 2007, and December 22, 2022, inclusive.",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 3
+        },
+        {
+          "text": "The Settlement Class includes the following: All Facebook users in the United States between May 24, 2007 and December 22, 2022.",
+          "source_pdf": "5f07e256-973d-4acb-bd05-dbfa0a246748.pdf",
+          "page_number": 1
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "All Facebook users in the United States between May 24, 2007, and December 22, 2022, inclusive.",
+        "key_facts": [
+          "Facebook users",
+          "United States",
+          "May 24, 2007",
+          "December 22, 2022"
+        ]
       },
       "category": "eligibility"
     },
     {
-      "question": "What are the class member criteria?",
-      "gold_passages": [],
+      "question": "What are the exclusions from the settlement class?",
+      "gold_passages": [
+        {
+          "text": "Excluded from the Settlement Class are (i) Meta and its employees, alleged co-conspirators, officers, directors, legal representatives, heirs, successors, and wholly or partly owned subsidiaries or affiliated companies; (ii) counsel for any plaintiff whose case was consolidated into this MDL and their employees, including but not limited to the undersigned counsel for Plaintiffs and the undersigned counsel's employees; (iii) individuals who submitted timely and valid exclusion requests",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 3
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "Excluded from the Settlement Class are: (i) Meta and its employees, officers, directors, legal representatives, heirs, successors, and affiliated companies; (ii) counsel for plaintiffs and their employees; (iii) individuals who submitted valid exclusion requests; (iv) the Discovery Mediators, Special Master, and Settlement Mediator; and (v) the Judges and Court staff assigned to the case.",
+        "key_facts": [
+          "Meta employees",
+          "officers and directors",
+          "plaintiff counsel",
+          "exclusion requests",
+          "judges and court staff"
+        ]
       },
       "category": "eligibility"
     },
     {
-      "question": "Are there any exclusions from the class definition?",
-      "gold_passages": [],
+      "question": "Can non-natural persons like companies file claims?",
+      "gold_passages": [
+        {
+          "text": "Only natural persons can create Facebook accounts, and accordingly only natural persons who set up accounts can file claims. The Class definition is therefore clear about whether it includes non-natural persons.",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 3
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "No, only natural persons can file claims. The court ruled that since only natural persons can create Facebook accounts, only natural persons who set up accounts can file claims.",
+        "key_facts": ["natural persons only", "non-natural persons excluded"]
       },
       "category": "eligibility"
     },
     {
       "question": "Who is the defendant in this case?",
-      "gold_passages": [],
+      "gold_passages": [
+        {
+          "text": "Defendant Facebook, Inc., now known as Meta Platforms, Inc. (\"Meta\")",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 2
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "The defendant is Facebook, Inc., now known as Meta Platforms, Inc. (Meta).",
+        "key_facts": ["Facebook, Inc.", "Meta Platforms, Inc."]
       },
       "category": "parties"
     },
     {
-      "question": "Who is the lead plaintiff?",
-      "gold_passages": [],
+      "question": "Who are the settlement class representatives?",
+      "gold_passages": [
+        {
+          "text": "Plaintiffs Steven Akins, Jason Ariciu, Anthony Bell, Bridgett Burk, Terry Fischer, Tyler King, Jordan O'Hara, and Cheryl Senko (together, \"Settlement Class Representatives\")",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 2
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "The Settlement Class Representatives are Steven Akins, Jason Ariciu, Anthony Bell, Bridgett Burk, Terry Fischer, Tyler King, Jordan O'Hara, and Cheryl Senko.",
+        "key_facts": [
+          "Steven Akins",
+          "Jason Ariciu",
+          "Anthony Bell",
+          "Bridgett Burk",
+          "Terry Fischer",
+          "Tyler King",
+          "Jordan O'Hara",
+          "Cheryl Senko"
+        ]
       },
       "category": "parties"
     },
     {
       "question": "Who is the settlement administrator?",
-      "gold_passages": [],
+      "gold_passages": [
+        {
+          "text": "The Court confirms its earlier appointment of Angeion Group to serve as the Settlement Administrator and finds that it thus far has fulfilled its duties under the Settlement.",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 4
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "The settlement administrator is Angeion Group.",
+        "key_facts": ["Angeion Group"]
       },
       "category": "parties"
     },
     {
       "question": "What is the deadline to submit a claim?",
-      "gold_passages": [],
+      "gold_passages": [
+        {
+          "text": "Your Claim Form must be submitted by August 25, 2023. If you submit your claim by U.S. mail, make sure the completed and signed Claim Form is postmarked by August 25, 2023.",
+          "source_pdf": "5f07e256-973d-4acb-bd05-dbfa0a246748.pdf",
+          "page_number": 1
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "The deadline to submit a claim is August 25, 2023. Claims can be submitted online by 11:59 p.m. PDT or by U.S. mail postmarked by August 25, 2023.",
+        "key_facts": ["August 25, 2023", "11:59 p.m. PDT"]
       },
       "category": "deadlines"
     },
     {
       "question": "When is the opt-out deadline?",
-      "gold_passages": [],
+      "gold_passages": [
+        {
+          "text": "Deadline for opt-outs July 26, 2023",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 12
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "The opt-out deadline is July 26, 2023. Opt-out forms must be postmarked by July 26, 2023, or submitted electronically by 11:59 p.m. PDT on July 26, 2023.",
+        "key_facts": ["July 26, 2023"]
       },
       "category": "deadlines"
     },
     {
-      "question": "When is the final approval hearing?",
-      "gold_passages": [],
+      "question": "When was the final approval hearing held?",
+      "gold_passages": [
+        {
+          "text": "the Court held a Final Approval Hearing on September 7, 2023, to consider approval of this Settlement",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 2
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "The Final Approval Hearing was held on September 7, 2023.",
+        "key_facts": ["September 7, 2023"]
       },
       "category": "deadlines"
     },
     {
       "question": "How is the claim amount calculated for each class member?",
-      "gold_passages": [],
+      "gold_passages": [
+        {
+          "text": "The Net Settlement Fund—including, to the greatest extent practicable, all interest earned on the Settlement Fund—shall be allocated to each Authorized Claimant pro rata by reference to the total number of allocation points assigned to all Authorized Claimants.",
+          "source_pdf": "ee7eb233-d7a6-4631-a6ee-2422c9cbbd33.pdf",
+          "page_number": 3
+        },
+        {
+          "text": "For each calendar month at any time during which an Authorized Claimant was a Facebook user with an activated account during the Class Period, such Authorized Claimant shall be assigned one allocation point.",
+          "source_pdf": "ee7eb233-d7a6-4631-a6ee-2422c9cbbd33.pdf",
+          "page_number": 3
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "The claim amount is calculated using allocation points distributed pro rata. Each Authorized Claimant receives one allocation point for each calendar month they had an activated Facebook account during the Class Period. The Net Settlement Fund is then divided proportionally based on total allocation points.",
+        "key_facts": [
+          "pro rata",
+          "allocation points",
+          "one point per calendar month",
+          "activated Facebook account"
+        ]
       },
       "category": "claim_calculation"
     },
     {
-      "question": "What determines how much each class member receives?",
-      "gold_passages": [],
+      "question": "Why is time on the platform used as the basis for calculating payments?",
+      "gold_passages": [
+        {
+          "text": "Meta has confirmed that there is a positive correlation between the length of time users have been on the platform and the degree to which third parties had access to users' information. Thus, the Plan of Allocation is designed to roughly track the probable extent to which third parties had access to Class Members' private information",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 7
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "Meta confirmed a positive correlation between length of time on the platform and the degree of third-party access to user information. The allocation method tracks the probable extent of third-party access to each class member's private information.",
+        "key_facts": [
+          "positive correlation",
+          "length of time on platform",
+          "third-party access",
+          "private information"
+        ]
       },
       "category": "claim_calculation"
     },
     {
-      "question": "What is the maximum individual payout?",
-      "gold_passages": [],
+      "question": "Is there a minimum payment amount?",
+      "gold_passages": [
+        {
+          "text": "the Settlement Administrator shall have the discretion, after consulting with Class Counsel, to select an amount for minimum payments to Authorized Claimants, with the goal of ensuring that payments to Authorized Claimants are administratively and economically feasible and that as much of the Net Settlement Fund as possible is actually distributed to Authorized Claimants.",
+          "source_pdf": "ee7eb233-d7a6-4631-a6ee-2422c9cbbd33.pdf",
+          "page_number": 4
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "The Settlement Administrator has discretion, after consulting with Class Counsel, to set a minimum payment amount. The goal is to ensure payments are administratively and economically feasible while distributing as much of the Net Settlement Fund as possible.",
+        "key_facts": [
+          "Settlement Administrator discretion",
+          "minimum payment",
+          "economically feasible"
+        ]
       },
       "category": "claim_calculation"
     },
     {
-      "question": "What fees are being requested by class counsel?",
-      "gold_passages": [],
+      "question": "What are the key dates in the settlement administration timeline?",
+      "gold_passages": [
+        {
+          "text": "Commencement of individual notice April 12, 2023 Completion of individual notice May 11, 2023 Deadline for objections July 26, 2023 Deadline for opt-outs July 26, 2023 Claims deadline August 25, 2023",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 12
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "Key dates: notice commenced April 12, 2023; notice completed May 11, 2023; objections and opt-outs deadline July 26, 2023; claims deadline August 25, 2023; distribution commences 90 days after the Effective Date; substantial completion of distribution 165 days after the Effective Date.",
+        "key_facts": [
+          "April 12, 2023",
+          "May 11, 2023",
+          "July 26, 2023",
+          "August 25, 2023",
+          "90 days after Effective Date",
+          "165 days after Effective Date"
+        ]
       },
       "category": "table"
     },
     {
-      "question": "What is the breakdown of settlement fund allocations?",
-      "gold_passages": [],
+      "question": "What payment methods are available for receiving settlement funds?",
+      "gold_passages": [
+        {
+          "text": "Prepaid Mastercard – Enter the email address where you will receive the Prepaid Mastercard",
+          "source_pdf": "5f07e256-973d-4acb-bd05-dbfa0a246748.pdf",
+          "page_number": 4
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "Settlement payments can be received via Prepaid Mastercard, PayPal, Venmo, Zelle, or Physical Check.",
+        "key_facts": [
+          "Prepaid Mastercard",
+          "PayPal",
+          "Venmo",
+          "Zelle",
+          "Physical Check"
+        ]
       },
       "category": "table"
     },
     {
-      "question": "What are the payment tiers listed in the settlement?",
-      "gold_passages": [],
+      "question": "What happens to unclaimed settlement payments?",
+      "gold_passages": [
+        {
+          "text": "If a payment made according to sections 5-6 and distributed to an Authorized Claimant via a check is not negotiated within ninety (90) days after the Settlement Administrator has contacted, or made reasonable attempts to contact, the Authorized Claimant, the Authorized Claimant shall be deemed to have waived and released their claim for payment under the Settlement Agreement.",
+          "source_pdf": "ee7eb233-d7a6-4631-a6ee-2422c9cbbd33.pdf",
+          "page_number": 4
+        }
+      ],
       "expected_answer": {
-        "answer_text": "TODO: Fill in after selecting test PDFs",
-        "key_facts": []
+        "answer_text": "Checks not negotiated within 90 days are forfeited and the claimant is deemed to have waived their claim. Undeliverable checks get one re-mailing attempt. If residual funds remain, Class Counsel and the Settlement Administrator propose an equitable redistribution to the Court.",
+        "key_facts": [
+          "90 days",
+          "waived",
+          "re-mailing attempt",
+          "residual funds redistribution"
+        ]
+      },
+      "category": "settlement"
+    },
+    {
+      "question": "How many people were notified about the settlement?",
+      "gold_passages": [
+        {
+          "text": "more than 93% of the target audience of 253 million Americans had received notice, each with an average frequency of more than 3 times",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 3
+        }
+      ],
+      "expected_answer": {
+        "answer_text": "More than 93% of the target audience of 253 million Americans received notice, each with an average frequency of more than 3 times.",
+        "key_facts": [
+          "93%",
+          "253 million Americans",
+          "average frequency of more than 3 times"
+        ]
+      },
+      "category": "settlement"
+    },
+    {
+      "question": "How much did Meta pay the FTC for the same conduct?",
+      "gold_passages": [
+        {
+          "text": "the $5 billion settlement paid by the company to the FTC for the conduct alleged in this case, and the fact that the company agreed to prospective relief with the FTC",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 6
+        }
+      ],
+      "expected_answer": {
+        "answer_text": "Meta paid a $5 billion settlement to the FTC for the same conduct alleged in this class action.",
+        "key_facts": ["$5 billion", "FTC"]
+      },
+      "category": "settlement"
+    },
+    {
+      "question": "What percentage of attorneys' fees is retained in the settlement fund?",
+      "gold_passages": [
+        {
+          "text": "Ten percent of Class Counsel's awarded attorneys' fees shall remain in the Settlement Fund until after Class Counsel files a Post-Distribution Accounting, as described herein, and the Court authorizes the release to Class Counsel of the attorneys' fees remaining in the Settlement Fund.",
+          "source_pdf": "149eed03-11f6-450b-8226-8ae5b44385e0.pdf",
+          "page_number": 9
+        }
+      ],
+      "expected_answer": {
+        "answer_text": "Ten percent (10%) of Class Counsel's awarded attorneys' fees is retained in the Settlement Fund until after Class Counsel files a Post-Distribution Accounting.",
+        "key_facts": ["10%", "retained", "Post-Distribution Accounting"]
       },
       "category": "table"
+    },
+    {
+      "question": "How can claims be submitted?",
+      "gold_passages": [
+        {
+          "text": "There are two ways to submit this Claim Form to the Settlement Administrator: (a) online at www.FacebookUserPrivacySettlement.com; or (b) by U.S. Mail to the following address: Facebook Consumer Privacy User Profile Litigation, c/o Settlement Administrator, 1650 Arch Street, Suite 2210, Philadelphia, PA 19103.",
+          "source_pdf": "5f07e256-973d-4acb-bd05-dbfa0a246748.pdf",
+          "page_number": 1
+        }
+      ],
+      "expected_answer": {
+        "answer_text": "Claims can be submitted online at www.FacebookUserPrivacySettlement.com or by U.S. Mail to Facebook Consumer Privacy User Profile Litigation, c/o Settlement Administrator, 1650 Arch Street, Suite 2210, Philadelphia, PA 19103.",
+        "key_facts": [
+          "www.FacebookUserPrivacySettlement.com",
+          "U.S. Mail",
+          "1650 Arch Street, Suite 2210, Philadelphia, PA 19103"
+        ]
+      },
+      "category": "deadlines"
     }
   ]
 }
