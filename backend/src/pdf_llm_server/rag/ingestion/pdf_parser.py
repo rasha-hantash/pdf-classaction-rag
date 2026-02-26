@@ -210,10 +210,11 @@ def parse_pdf_pymupdf(file_path: str | Path) -> ParsedDocument:
                 for table_idx, table in enumerate(page_tables):
                     extracted = table.extract()
                     if extracted and len(extracted) > 0:
-                        headers = [str(cell) if cell else "" for cell in extracted[0]]
+                        headers = [str(cell) if cell else "" for cell in extracted[0]] if extracted[0] else []
                         rows = [
                             [str(cell) if cell else "" for cell in row]
                             for row in extracted[1:]
+                            if row is not None
                         ]
                         tables.append(
                             TableData(table_index=table_idx, headers=headers, rows=rows)

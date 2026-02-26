@@ -37,6 +37,13 @@ class ChunkData(BaseModel):
     """A chunk of content ready for embedding."""
 
     content: str
+
+    @field_validator("content")
+    @classmethod
+    def strip_nul_bytes(cls, v: str) -> str:
+        """Remove NUL (0x00) characters that PostgreSQL cannot store in text fields."""
+        return v.replace("\x00", "")
+
     chunk_type: str
     page_number: int
     position: int
