@@ -211,9 +211,19 @@ def parse_pdf_pymupdf(file_path: str | Path) -> ParsedDocument:
                     extracted = table.extract()
                     if extracted and len(extracted) > 0:
                         headers = [str(cell) if cell else "" for cell in extracted[0]] if extracted[0] else []
+                        all_rows = extracted[1:]
+                        none_count = sum(1 for row in all_rows if row is None)
+                        if none_count > 0:
+                            logger.debug(
+                                "filtered none rows from table",
+                                page_number=page_num + 1,
+                                table_index=table_idx,
+                                none_rows=none_count,
+                                total_rows=len(all_rows),
+                            )
                         rows = [
                             [str(cell) if cell else "" for cell in row]
-                            for row in extracted[1:]
+                            for row in all_rows
                             if row is not None
                         ]
                         tables.append(
