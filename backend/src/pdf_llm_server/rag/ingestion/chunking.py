@@ -207,11 +207,17 @@ def chunk_parsed_document(
         current_blocks: list[tuple[str, list[float] | None]] = []
 
         for block in page.blocks:
-            if block.block_type != current_type and current_blocks:
+            is_heading = block.block_type == "heading"
+            was_heading = current_type == "heading"
+
+            # Flush when crossing heading <-> non-heading boundary
+            if current_blocks and (is_heading != was_heading):
                 groups.append((current_type, current_blocks))
                 current_blocks = []
+                current_type = None
 
-            current_type = block.block_type
+            if current_type is None:
+                current_type = block.block_type
             current_blocks.append((block.text, block.bbox))
 
         if current_blocks:

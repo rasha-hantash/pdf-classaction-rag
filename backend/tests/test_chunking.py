@@ -4,9 +4,16 @@ import pytest
 
 from pdf_llm_server.rag.ingestion.chunking import (
     ChunkData,
+    chunk_parsed_document,
     detect_content_type,
     fixed_size_chunking,
     semantic_chunking_by_paragraphs,
+)
+from pdf_llm_server.rag.ingestion.parser_models import (
+    ParsedDocument,
+    ParsedPage,
+    TableData,
+    TextBlock,
 )
 
 
@@ -182,3 +189,145 @@ class TestChunkData:
             position=0,
         )
         assert chunk.bbox is None
+
+
+class TestChunkParsedDocument:
+    """Tests for chunk_parsed_document grouping logic."""
+
+    @staticmethod
+    def _make_doc(
+        blocks: list[tuple[str, str]],
+        tables: list[TableData] | None = None,
+    ) -> ParsedDocument:
+        """Build a single-page ParsedDocument from (block_type, text) tuples."""
+        text_blocks = [
+            TextBlock(
+                block_index=i,
+                block_type=bt,
+                text=text,
+                font_size=12.0,
+                is_bold=bt == "heading",
+                bbox=[0.0, float(i * 20), 100.0, float(i * 20 + 15)],
+            )
+            for i, (bt, text) in enumerate(blocks)
+        ]
+        return ParsedDocument(
+            file_path="test.pdf",
+            total_pages=1,
+            pages=[
+                ParsedPage(
+                    page_number=1,
+                    blocks=text_blocks,
+                    tables=tables or [],
+                )
+            ],
+        )
+
+    def test_same_type_blocks_merge(self):
+        """[para, para, para] → 1 chunk."""
+        doc = self._make_doc([
+            ("paragraph", "First sentence."),
+            ("paragraph", "Second sentence."),
+            ("paragraph", "Third sentence."),
+        ])
+        chunks = chunk_parsed_document(doc)
+        assert len(chunks) == 1
+        assert chunks[0].chunk_type == "paragraph"
+
+    def test_heading_splits_group(self):
+        """[heading, para, para] → 2 chunks."""
+        doc = self._make_doc([
+            ("heading", "Title"),
+            ("paragraph", "Body one."),
+            ("paragraph", "Body two."),
+        ])
+        chunks = chunk_parsed_document(doc)
+        assert len(chunks) == 2
+        assert chunks[0].chunk_type == "heading"
+        assert chunks[1].chunk_type == "paragraph"
+
+    def test_mixed_body_types_merge(self):
+        """[para, list_item, para] → 1 chunk (core fix)."""
+        doc = self._make_doc([
+            ("paragraph", "Intro text."),
+            ("list_item", "1. First point."),
+            ("paragraph", "Continuation text."),
+        ])
+        chunks = chunk_parsed_document(doc)
+        assert len(chunks) == 1
+        assert "Intro text." in chunks[0].content
+        assert "1. First point." in chunks[0].content
+        assert "Continuation text." in chunks[0].content
+
+    def test_heading_between_paragraphs_splits(self):
+        """[para, heading, para] → 3 chunks."""
+        doc = self._make_doc([
+            ("paragraph", "Before heading."),
+            ("heading", "Section Title"),
+            ("paragraph", "After heading."),
+        ])
+        chunks = chunk_parsed_document(doc)
+        assert len(chunks) == 3
+        assert chunks[0].chunk_type == "paragraph"
+        assert chunks[1].chunk_type == "heading"
+        assert chunks[2].chunk_type == "paragraph"
+
+    def test_list_item_then_paragraph_merge(self):
+        """[list_item, para] → 1 chunk with type=list_item."""
+        doc = self._make_doc([
+            ("list_item", "1. Review standard."),
+            ("paragraph", "The court applies de novo review."),
+        ])
+        chunks = chunk_parsed_document(doc)
+        assert len(chunks) == 1
+        assert chunks[0].chunk_type == "list_item"
+
+    def test_consecutive_headings_merge(self):
+        """[heading, heading] → 1 chunk."""
+        doc = self._make_doc([
+            ("heading", "CHAPTER ONE"),
+            ("heading", "Introduction"),
+        ])
+        chunks = chunk_parsed_document(doc)
+        assert len(chunks) == 1
+        assert chunks[0].chunk_type == "heading"
+
+    def test_headings_then_paragraph_split(self):
+        """[heading, heading, para] → 2 chunks."""
+        doc = self._make_doc([
+            ("heading", "CHAPTER ONE"),
+            ("heading", "Introduction"),
+            ("paragraph", "Body text here."),
+        ])
+        chunks = chunk_parsed_document(doc)
+        assert len(chunks) == 2
+        assert chunks[0].chunk_type == "heading"
+        assert chunks[1].chunk_type == "paragraph"
+
+    def test_block_bboxes_populated(self):
+        """[para, list_item] → 1 chunk with 2 block_bboxes."""
+        doc = self._make_doc([
+            ("paragraph", "First block."),
+            ("list_item", "1. Second block."),
+        ])
+        chunks = chunk_parsed_document(doc)
+        assert len(chunks) == 1
+        assert chunks[0].block_bboxes is not None
+        assert len(chunks[0].block_bboxes) == 2
+
+    def test_tables_unchanged(self):
+        """Page with blocks + tables → table chunk separate with type=table."""
+        table = TableData(
+            table_index=0,
+            headers=["Col A", "Col B"],
+            rows=[["val1", "val2"]],
+        )
+        doc = self._make_doc(
+            [("paragraph", "Some text.")],
+            tables=[table],
+        )
+        chunks = chunk_parsed_document(doc)
+        assert len(chunks) == 2
+        assert chunks[0].chunk_type == "paragraph"
+        assert chunks[1].chunk_type == "table"
+        assert "Col A" in chunks[1].content
