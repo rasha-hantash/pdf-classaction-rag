@@ -214,7 +214,7 @@ def parse_pdf_pymupdf(file_path: str | Path) -> ParsedDocument:
                         all_rows = extracted[1:]
                         none_count = sum(1 for row in all_rows if row is None)
                         if none_count > 0:
-                            logger.debug(
+                            logger.info(
                                 "filtered none rows from table",
                                 page_number=page_num + 1,
                                 table_index=table_idx,

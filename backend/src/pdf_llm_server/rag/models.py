@@ -46,7 +46,7 @@ class ChunkData(BaseModel):
         """Remove NUL (0x00) characters that PostgreSQL cannot store in text fields."""
         if "\x00" not in v:
             return v
-        logger.debug("stripped nul bytes from chunk content", original_length=len(v))
+        logger.info("stripped nul bytes from chunk content", original_length=len(v))
         return v.replace("\x00", "")
 
     chunk_type: str
