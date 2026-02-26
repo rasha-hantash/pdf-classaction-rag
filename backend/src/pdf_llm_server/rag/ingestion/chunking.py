@@ -153,6 +153,38 @@ def detect_content_type(text: str) -> str:
     return "paragraph"
 
 
+def _find_chunk_block_bboxes(
+    chunk_text: str,
+    block_list: list[tuple[str, list[float] | None]],
+) -> list[list[float]]:
+    """Find which blocks contributed text to a chunk and return their bboxes.
+
+    Walks through the joined text to find the character range of the chunk,
+    then returns bboxes for all blocks that overlap that range.
+    """
+    joined = " ".join(text for text, _ in block_list)
+    chunk_start = joined.find(chunk_text)
+    if chunk_start == -1:
+        # Fallback: return all non-None bboxes
+        return [list(bbox) for _, bbox in block_list if bbox is not None]
+
+    chunk_end = chunk_start + len(chunk_text)
+    bboxes = []
+    pos = 0
+
+    for text, bbox in block_list:
+        block_start = pos
+        block_end = pos + len(text)
+
+        if block_end > chunk_start and block_start < chunk_end:
+            if bbox is not None:
+                bboxes.append(list(bbox))
+
+        pos = block_end + 1  # +1 for the space separator
+
+    return bboxes
+
+
 def chunk_parsed_document(
     doc: ParsedDocument, strategy: str = "semantic"
 ) -> list[ChunkData]:
@@ -169,50 +201,52 @@ def chunk_parsed_document(
     position = 0
 
     for page in doc.pages:
-        # Group consecutive blocks of same type
-        page_text_parts = []
-        current_type = None
-        current_texts = []
-        current_bbox = None
+        # Group consecutive blocks of same type, tracking per-block info
+        groups: list[tuple[str, list[tuple[str, list[float] | None]]]] = []
+        current_type: str | None = None
+        current_blocks: list[tuple[str, list[float] | None]] = []
 
         for block in page.blocks:
-            if block.block_type != current_type and current_texts:
-                # Flush accumulated text
-                combined_text = " ".join(current_texts)
-                page_text_parts.append((combined_text, current_type, current_bbox))
-                current_texts = []
-                current_bbox = None
+            if block.block_type != current_type and current_blocks:
+                groups.append((current_type, current_blocks))
+                current_blocks = []
 
             current_type = block.block_type
-            current_texts.append(block.text)
-            # Keep first bbox for the group
-            if current_bbox is None:
-                current_bbox = block.bbox
+            current_blocks.append((block.text, block.bbox))
 
-        # Flush final group
-        if current_texts:
-            combined_text = " ".join(current_texts)
-            page_text_parts.append((combined_text, current_type, current_bbox))
+        if current_blocks:
+            groups.append((current_type, current_blocks))
 
         # Apply chunking strategy to each group
-        for text, block_type, bbox in page_text_parts:
+        for block_type, block_list in groups:
+            combined_text = " ".join(text for text, _ in block_list)
+
             if strategy == "fixed":
-                text_chunks = fixed_size_chunking(text)
+                text_chunks = fixed_size_chunking(combined_text)
             else:  # semantic
-                text_chunks = semantic_chunking_by_paragraphs(text)
+                text_chunks = semantic_chunking_by_paragraphs(combined_text)
 
             for chunk_text in text_chunks:
-                if chunk_text.strip():
-                    chunks.append(
-                        ChunkData(
-                            content=chunk_text,
-                            chunk_type=block_type or "paragraph",
-                            page_number=page.page_number,
-                            position=position,
-                            bbox=bbox,
-                        )
+                if not chunk_text.strip():
+                    continue
+
+                # Find which blocks contributed to this chunk
+                block_bboxes = _find_chunk_block_bboxes(
+                    chunk_text, block_list
+                )
+                first_bbox = block_bboxes[0] if block_bboxes else None
+
+                chunks.append(
+                    ChunkData(
+                        content=chunk_text,
+                        chunk_type=block_type or "paragraph",
+                        page_number=page.page_number,
+                        position=position,
+                        bbox=first_bbox,
+                        block_bboxes=block_bboxes or None,
                     )
-                    position += 1
+                )
+                position += 1
 
         # Handle tables as separate chunks
         for table in page.tables:

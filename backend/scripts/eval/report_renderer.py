@@ -164,17 +164,20 @@ def draw_chunk_overlays(
     page_chunks = [c for c in chunks if c.page_number == page_number]
 
     for i, chunk in enumerate(page_chunks):
-        if chunk.bbox is None:
-            continue
-
-        coords = compute_bbox_to_image_coords(
-            chunk.bbox, dpi, page_width, page_height, is_normalized
-        )
         color = CHUNK_COLORS[i % len(CHUNK_COLORS)]
-        draw.rectangle(coords, fill=color, outline=color[:3] + (180,))
-
         label = f"C{chunk.position}"
-        draw.text((coords[0] + 2, coords[1] + 2), label, fill=(0, 0, 0, 220), font=font)
+        labeled = False
+
+        # Draw individual block bboxes if available, otherwise single bbox
+        bboxes = chunk.block_bboxes if chunk.block_bboxes else ([chunk.bbox] if chunk.bbox else [])
+        for bbox in bboxes:
+            coords = compute_bbox_to_image_coords(
+                bbox, dpi, page_width, page_height, is_normalized
+            )
+            draw.rectangle(coords, fill=color, outline=color[:3] + (180,))
+            if not labeled:
+                draw.text((coords[0] + 2, coords[1] + 2), label, fill=(0, 0, 0, 220), font=font)
+                labeled = True
 
     result = Image.alpha_composite(base_image, overlay)
     buf = io.BytesIO()
@@ -310,9 +313,6 @@ def generate_html_report(
                     .replace(">", "&gt;")
                     .replace('"', "&quot;")
                 )
-                text_preview = escaped_text[:300]
-                if len(escaped_text) > 300:
-                    text_preview += "..."
 
                 blocks_html += f"""
                 <div class="card" data-block-index="{block['block_index']}" data-block-type="{block['block_type']}">
@@ -320,7 +320,7 @@ def generate_html_report(
                         <span class="badge badge-{block['block_type']}">{block['block_type']}</span>
                         <span class="block-meta">Block {block['block_index']} | font: {block['font_size']:.1f} | bold: {str(block['is_bold']).lower()}</span>
                     </div>
-                    <div class="card-text">{text_preview}</div>
+                    <div class="card-text">{escaped_text}</div>
                     <div class="verdict-row">
                         <label><input type="radio" name="verdict-{parser_name}-{page_num}-{block['block_index']}" value="correct" onchange="onVerdictChange(this)"> Correct</label>
                         <label><input type="radio" name="verdict-{parser_name}-{page_num}-{block['block_index']}" value="partial" onchange="onVerdictChange(this)"> Partial</label>
@@ -338,9 +338,6 @@ def generate_html_report(
                     .replace(">", "&gt;")
                     .replace('"', "&quot;")
                 )
-                content_preview = escaped_content[:300]
-                if len(escaped_content) > 300:
-                    content_preview += "..."
 
                 chunks_html += f"""
                 <div class="card chunk-card">
@@ -348,7 +345,7 @@ def generate_html_report(
                         <span class="badge badge-{chunk['chunk_type']}">{chunk['chunk_type']}</span>
                         <span class="block-meta">Chunk pos {chunk['position']}</span>
                     </div>
-                    <div class="card-text">{content_preview}</div>
+                    <div class="card-text">{escaped_content}</div>
                 </div>"""
 
             is_first_page = page_num == parser_pages[0]["page_number"]
@@ -409,7 +406,7 @@ def generate_html_report(
     for page_info in first_pages:
         page_options += f'<option value="{page_info["page_number"]}">Page {page_info["page_number"]}</option>'
 
-    html = f"""<!DOCTYPE html>
+    html_output = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -443,7 +440,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 .badge-list_item {{ background: #9c27b0; }}
 .badge-table {{ background: #4caf50; }}
 .block-meta {{ font-size: 11px; color: #888; }}
-.card-text {{ font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto; padding: 6px; background: #fafafa; border-radius: 4px; margin-bottom: 8px; }}
+.card-text {{ font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; padding: 6px; background: #fafafa; border-radius: 4px; margin-bottom: 8px; }}
 .verdict-row {{ display: flex; gap: 12px; margin-bottom: 6px; }}
 .verdict-row label {{ font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 4px; }}
 .correction-input {{ width: 100%; min-height: 60px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; resize: vertical; }}
@@ -764,4 +761,4 @@ function downloadGroundTruth() {{
 </body>
 </html>"""
 
-    return html
+    return html_output
