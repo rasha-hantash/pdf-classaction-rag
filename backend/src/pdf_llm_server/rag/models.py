@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..logger import logger
+
 
 class IngestedDocument(BaseModel):
     id: UUID
@@ -37,6 +39,16 @@ class ChunkData(BaseModel):
     """A chunk of content ready for embedding."""
 
     content: str
+
+    @field_validator("content")
+    @classmethod
+    def strip_nul_bytes(cls, v: str) -> str:
+        """Remove NUL (0x00) characters that PostgreSQL cannot store in text fields."""
+        if "\x00" not in v:
+            return v
+        logger.info("stripped nul bytes from chunk content", original_length=len(v))
+        return v.replace("\x00", "")
+
     chunk_type: str
     page_number: int
     position: int
